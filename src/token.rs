@@ -1,0 +1,21 @@
+#[derive(Debug, Clone)]
+pub enum Token {
+    Indent,
+    Dedent,
+    KeywordDef,
+    KeywordReturn,
+    Identifier { value: String },
+    Number { value: i32 },
+    Colon,
+    OpeningParenthesis,
+    ClosingParenthesis,
+    OpeningBrace,
+    ClosingBrace,
+    OpeningBracket,
+    ClosingBracket,
+    Comma,
+    Plus,
+    Minus,
+    Arrow,
+    NewLine,
+}

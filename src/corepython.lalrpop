@@ -1,0 +1,92 @@
+// Core python language, nothing fancy, keep it simple.
+
+use crate::ast;
+use crate::token::Token;
+
+grammar;
+
+pub Program: ast::Program = {
+    <f:FunctionDef*> => {
+        let functions = f;
+        ast::Program { functions }
+    },
+};
+
+FunctionDef: ast::FunctionDef = {
+    "def" <name:Identifier> "(" <parameters:OneOrMore<FunctionParameter>> ")" "->" <result:Expression> ":" <body:Statement+> => {
+        ast::FunctionDef { name, parameters, result, body }
+    }
+};
+
+FunctionParameter: ast::Parameter = {
+    <name:Identifier> ":" <typ:Expression> => {
+        ast::Parameter { name, typ }
+    }
+};
+
+Statement: ast::Statement = {
+    "return" <expr:Expression> => {
+        ast::Statement::Return(expr)
+    }
+};
+
+Expression: ast::Expression = {
+    ArithmatricExpression,
+};
+
+ArithmatricExpression: ast::Expression = {
+    <a:ArithmatricExpression> <op:AddOp> <b:Term> => {
+        ast::Expression::BinaryOperation { a: Box::new(a), op, b: Box::new(b) }
+    },
+    Term,
+};
+
+AddOp: ast::BinaryOperation = {
+    "+" => ast::BinaryOperation::Add,
+    "-" => ast::BinaryOperation::Sub,
+};
+
+Term: ast::Expression = {
+    Factor,
+};
+
+Factor: ast::Expression = {
+    Atom,
+};
+
+Atom: ast::Expression = {
+    <n:Number> => {
+        ast::Expression::Number(n)
+    },
+    <n:Identifier> => {
+        ast::Expression::Identifier(n)
+    }
+};
+
+#[inline]
+OneOrMore<T>: Vec<T> = {
+    <i1: T> <i2:("," T)*> => {
+        let mut items = vec![i1];
+        items.extend(i2.into_iter().map(|e| e.1));
+        items
+    }
+};
+
+extern {
+    type Location = usize;
+    type Error = String;
+
+    enum Token {
+        Number => Token::Number { value: <i32> },
+        Identifier => Token::Identifier { value: <String> },
+        "def" => Token::KeywordDef,
+        "return" => Token::KeywordReturn,
+        "(" => Token::OpeningParenthesis,
+        ")" => Token::ClosingParenthesis,
+        "," => Token::Comma,
+        ":" => Token::Colon,
+        "+" => Token::Plus,
+        "-" => Token::Minus,
+        "->" => Token::Arrow,
+    }
+}
