@@ -185,7 +185,29 @@ where
 
     fn write_instruction(&mut self, opcode: &Instruction) -> Result<(), std::io::Error> {
         match opcode {
+            Instruction::Nop => self.write_byte(0x01)?,
+            Instruction::Block => {
+                self.write_byte(0x02)?;
+                self.write_byte(0x40)?;
+            }
+            Instruction::Loop => {
+                self.write_byte(0x03)?;
+                self.write_byte(0x40)?;
+            }
+            Instruction::If => {
+                self.write_byte(0x04)?;
+                self.write_byte(0x40)?;
+            }
+            Instruction::Else => self.write_byte(0x05)?,
             Instruction::End => self.write_byte(0x0B)?,
+            Instruction::Br(label) => {
+                self.write_byte(0x0C)?;
+                self.write_index(*label)?;
+            }
+            Instruction::BrIf(label) => {
+                self.write_byte(0x0D)?;
+                self.write_index(*label)?;
+            }
             Instruction::LocalGet(index) => {
                 self.write_byte(0x20)?;
                 self.write_index(*index)?;
@@ -196,6 +218,27 @@ where
             Instruction::I32Const(value) => {
                 self.write_byte(0x41)?;
                 self.write_vi32(*value)?;
+            }
+            Instruction::I32Eqz => {
+                self.write_byte(0x45)?;
+            }
+            Instruction::I32Eq => {
+                self.write_byte(0x46)?;
+            }
+            Instruction::I32Ne => {
+                self.write_byte(0x47)?;
+            }
+            Instruction::I32LtS => {
+                self.write_byte(0x48)?;
+            }
+            Instruction::I32GtS => {
+                self.write_byte(0x4A)?;
+            }
+            Instruction::I32LeS => {
+                self.write_byte(0x4C)?;
+            }
+            Instruction::I32GeS => {
+                self.write_byte(0x4E)?;
             }
             Instruction::I32Add => {
                 self.write_byte(0x6A)?;
@@ -250,13 +293,14 @@ where
     }
 
     fn write_byte(&mut self, byte: u8) -> Result<(), std::io::Error> {
-        debug!("Byte: {:02X}", byte);
+        // debug!("Byte: {:02X}", byte);
         self.buffer.write(&[byte])?;
         Ok(())
     }
 }
 
 pub fn write_wasm(wasm: WasmModule, filename: &str) -> Result<(), std::io::Error> {
+    info!("Writing WebAssembly to {}", filename);
     let buf = std::fs::File::create(filename)?;
     let mut writer = Writer::new(buf);
     writer.write(wasm)?;
@@ -265,11 +309,29 @@ pub fn write_wasm(wasm: WasmModule, filename: &str) -> Result<(), std::io::Error
 
 #[derive(Debug)]
 pub enum Instruction {
+    Nop,
+    Block,
+    Loop,
+    If,
+    Else,
     End,
+    Br(usize),
+    BrIf(usize),
     LocalGet(usize),
     // LocalSet(usize),
     // LocalTee(usize),
     I32Const(i32),
+    I32Eqz,
+    I32Eq,
+    I32Ne,
+    I32LtS,
+    // I32Lt_u,
+    I32GtS,
+    // I32Gt_u,
+    I32LeS,
+    // I32Le_u,
+    I32GeS,
+    // I32Ge_u,
     I32Add,
     I32Sub,
     I32Mul,

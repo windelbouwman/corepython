@@ -1,5 +1,6 @@
 
 from ppci.wasm import instantiate, read_wasm
+import demo
 
 with open('demo.wasm', 'rb') as f:
     module = read_wasm(f)
@@ -7,6 +8,7 @@ with open('demo.wasm', 'rb') as f:
 inst = instantiate(module, {})
 
 print(inst)
-print('myAdd', inst.exports['myAdd'](7, 55))
-print('mySub', inst.exports['mySub'](7, 2))
-
+print('myAdd(0, 55)', inst.exports['myAdd'](0, 55), 'should be:', demo.myAdd(0, 55))
+print('myAdd(7, 55)', inst.exports['myAdd'](7, 55), 'should be:', demo.myAdd(7, 55))
+print('mySub(7, 2)', inst.exports['mySub'](7, 2), 'should be:', demo.mySub(7, 2))
+print('mySub(17, 2)', inst.exports['mySub'](17, 2), 'should be:', demo.mySub(17, 2))

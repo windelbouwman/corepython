@@ -1,0 +1,33 @@
+<html>
+    <head>
+        <title>COOL</title>
+        <meta charset="utf-8">
+    </head>
+    <body>
+        <script>
+            function println(text) {
+                console.log(text);
+            }
+
+            function myOnload() {
+                fetch("demo.wasm")
+                .then(response => response.arrayBuffer())
+                .then(bytes => WebAssembly.instantiate(bytes))
+                .then(results => {
+                    var res = results.instance.exports.myAdd(0, 55);
+                    console.log("myAdd(0, 55) = ", res);
+                    var res = results.instance.exports.myAdd(7, 55);
+                    console.log("myAdd(7, 55) = ", res);
+                    var res = results.instance.exports.mySub(7, 2);
+                    console.log("mySub(7, 2) = ", res);
+                    var res = results.instance.exports.mySub(17, 2);
+                    console.log("mySub(17, 2) = ", res);
+                });
+            }
+
+            window.onload = myOnload;
+        </script>
+
+    </body>
+
+</html>

@@ -6,14 +6,13 @@ use crate::token::Token;
 grammar;
 
 pub Program: ast::Program = {
-    <f:FunctionDef*> => {
-        let functions = f;
+    <functions:FunctionDef*> => {
         ast::Program { functions }
     },
 };
 
 FunctionDef: ast::FunctionDef = {
-    "def" <name:Identifier> "(" <parameters:OneOrMore<FunctionParameter>> ")" "->" <result:Expression> ":" <body:Statement+> => {
+    "def" <name:Identifier> "(" <parameters:OneOrMore<FunctionParameter>> ")" "->" <result:Expression> ":" <body:Suite> => {
         ast::FunctionDef { name, parameters, result, body }
     }
 };
@@ -24,10 +23,40 @@ FunctionParameter: ast::Parameter = {
     }
 };
 
+Suite: Vec<ast::Statement> = {
+    Indent <statements:Statement+> Dedent => statements
+};
+
 Statement: ast::Statement = {
     "return" <expr:Expression> => {
         ast::Statement::Return(expr)
+    },
+    "if" <condition:Test> ":" <suite:Suite> "else" ":" <else_suite:Suite> => {
+        ast::Statement::If { condition: Box::new(condition), suite: Box::new(suite), else_suite: Box::new(else_suite) }
+    },
+    "while" <condition:Test> ":" <suite:Suite> => {
+        ast::Statement::While { condition: Box::new(condition), suite: Box::new(suite) }
+    },
+    "for" <target:Identifier> "in" <iter:Expression> ":" <suite:Suite> => {
+        ast::Statement::For { target, iter: Box::new(iter), suite: Box::new(suite) }
+    },
+    "break" => ast::Statement::Break,
+    "continue" => ast::Statement::Continue,
+};
+
+Test: ast::Expression = {
+    <e1:Expression> <op:Comparison> <e2:Expression> => {
+        ast::Expression::Comparison { a: Box::new(e1), op, b: Box::new(e2) }
     }
+};
+
+Comparison: ast::Comparison = {
+    "<" => ast::Comparison::Lt,
+    ">" => ast::Comparison::Gt,
+    "<=" => ast::Comparison::Le,
+    ">=" => ast::Comparison::Ge,
+    "==" => ast::Comparison::Equal,
+    "!=" => ast::Comparison::NotEqual,
 };
 
 Expression: ast::Expression = {
@@ -79,13 +108,29 @@ extern {
     enum Token {
         Number => Token::Number { value: <i32> },
         Identifier => Token::Identifier { value: <String> },
+        Indent => Token::Indent,
+        Dedent => Token::Dedent,
+        "break" => Token::KeywordBreak,
+        "continue" => Token::KeywordContinue,
         "def" => Token::KeywordDef,
+        "else" => Token::KeywordElse,
+        "for" => Token::KeywordFor,
+        "if" => Token::KeywordIf,
+        "in" => Token::KeywordIn,
         "return" => Token::KeywordReturn,
+        "while" => Token::KeywordWhile,
         "(" => Token::OpeningParenthesis,
         ")" => Token::ClosingParenthesis,
         "," => Token::Comma,
         ":" => Token::Colon,
         "+" => Token::Plus,
+        "*" => Token::Asterix,
+        "<" => Token::Less,
+        ">" => Token::Greater,
+        "<=" => Token::LessEqual,
+        ">=" => Token::GreaterEqual,
+        "==" => Token::EqualEqual,
+        "!=" => Token::NotEqual,
         "-" => Token::Minus,
         "->" => Token::Arrow,
     }
