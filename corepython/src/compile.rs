@@ -73,6 +73,8 @@ impl Compiler {
             params.push(param_type);
         }
 
+        let results = vec![self.get_type(&function_def.result)];
+
         self.compile_suite(&function_def.body);
 
         // Implicit return 0:
@@ -83,7 +85,7 @@ impl Compiler {
         let code = std::mem::replace(&mut self.code, vec![]);
 
         self.module
-            .add_function(function_def.name.clone(), params, code);
+            .add_function(function_def.name.clone(), params, results, code);
     }
 
     fn compile_suite(&mut self, suite: &[ast::Statement]) {

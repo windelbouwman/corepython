@@ -13,8 +13,14 @@ impl WasmModule {
         }
     }
 
-    pub fn add_function(&mut self, name: String, params: Vec<Type>, code: Vec<Instruction>) {
-        self.types.push((params, vec![Type::I32]));
+    pub fn add_function(
+        &mut self,
+        name: String,
+        params: Vec<Type>,
+        results: Vec<Type>,
+        code: Vec<Instruction>,
+    ) {
+        self.types.push((params, results));
         let index = self.functions.len();
         self.exports.push(Export { name, index });
         self.functions.push(Function { code });
@@ -30,11 +36,11 @@ struct Export {
     index: usize,
 }
 
-struct Writer<W>
+struct Writer<'w, W>
 where
     W: std::io::Write,
 {
-    buffer: W,
+    buffer: &'w mut W,
 }
 
 pub enum Type {
@@ -44,11 +50,11 @@ pub enum Type {
     F64,
 }
 
-impl<W> Writer<W>
+impl<'w, W> Writer<'w, W>
 where
     W: std::io::Write,
 {
-    fn new(buffer: W) -> Self {
+    fn new(buffer: &'w mut W) -> Self {
         Writer { buffer }
     }
 
@@ -299,9 +305,7 @@ where
     }
 }
 
-pub fn write_wasm(wasm: WasmModule, filename: &str) -> Result<(), std::io::Error> {
-    info!("Writing WebAssembly to {}", filename);
-    let buf = std::fs::File::create(filename)?;
+pub fn write_wasm<W: std::io::Write>(wasm: WasmModule, buf: &mut W) -> Result<(), std::io::Error> {
     let mut writer = Writer::new(buf);
     writer.write(wasm)?;
     Ok(())

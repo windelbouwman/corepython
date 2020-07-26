@@ -32,6 +32,8 @@ def myAdd(a: int, b: int) -> int:
 
 # Usage
 
+Compile demo.py into a wasm file locally:
+
     $ cargo run
     $ ls demo.wasm
     $ python run_it.py
@@ -40,6 +42,24 @@ Or view the wasm in the browser:
 
     $ python -m http.server
     $ open test_page.html in the browser
+
+Or use the wasm build of corepython, and use it from npm:
+
+    $ cd corepython-wasm
+    $ wasm-pack build
+    $ cd www
+    $ npm install
+    $ npm run start
+
+# Design topics
+
+Below is a list of python concepts and how they map to WebAssembly.
+
+- How to implement python `int`? For now, it is mapped to WebAssembly `i32`.
+- How to implement python `str`? TODO, check javascript bindgen
+- How to implement python `float`? Map it to `f64`.
+- How to implement python `list`? TODO
+- How to implement python trickery like `eval`, `exec`, `sys.setprofile`? We don't.
 
 # Planning
 

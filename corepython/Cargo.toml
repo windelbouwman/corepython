@@ -1,0 +1,18 @@
+[package]
+name = "corepython"
+version = "0.1.0"
+authors = ["Windel Bouwman <windel@windel.nl>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[build-dependencies]
+lalrpop = "0.19.0"
+
+[dependencies]
+
+lalrpop-util = "0.19.0"
+leb128 = "0.2.4"
+log = "0.4.11"
+logos = "0.11.4"
+scroll = "0.10.1"

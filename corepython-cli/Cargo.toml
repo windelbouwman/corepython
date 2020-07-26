@@ -1,0 +1,13 @@
+[package]
+name = "corepython-cli"
+version = "0.1.0"
+authors = ["Windel Bouwman <windel@windel.nl>"]
+edition = "2018"
+
+[dependencies]
+
+clap = "2.33.1"
+log = "0.4.11"
+simple_logger = "1.6.0"
+
+corepython = { path = "../corepython" }

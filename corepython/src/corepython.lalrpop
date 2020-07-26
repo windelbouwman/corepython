@@ -2,6 +2,7 @@
 
 use crate::ast;
 use crate::token::Token;
+use crate::lexer;
 
 grammar;
 
@@ -102,14 +103,15 @@ OneOrMore<T>: Vec<T> = {
 };
 
 extern {
-    type Location = usize;
-    type Error = String;
+    type Location = lexer::Location;
+    type Error = lexer::LexicalError;
 
     enum Token {
         Number => Token::Number { value: <i32> },
         Identifier => Token::Identifier { value: <String> },
         Indent => Token::Indent,
         Dedent => Token::Dedent,
+        "and" => Token::KeywordAnd,
         "break" => Token::KeywordBreak,
         "continue" => Token::KeywordContinue,
         "def" => Token::KeywordDef,
@@ -117,6 +119,7 @@ extern {
         "for" => Token::KeywordFor,
         "if" => Token::KeywordIf,
         "in" => Token::KeywordIn,
+        "or" => Token::KeywordOr,
         "return" => Token::KeywordReturn,
         "while" => Token::KeywordWhile,
         "(" => Token::OpeningParenthesis,

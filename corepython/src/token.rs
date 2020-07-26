@@ -2,6 +2,7 @@
 pub enum Token {
     Indent,
     Dedent,
+    KeywordAnd,
     KeywordBreak,
     KeywordClass,
     KeywordContinue,
@@ -10,6 +11,7 @@ pub enum Token {
     KeywordFor,
     KeywordIf,
     KeywordIn,
+    KeywordOr,
     KeywordReturn,
     KeywordWhile,
     Identifier { value: String },
