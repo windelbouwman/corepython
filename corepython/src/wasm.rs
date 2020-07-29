@@ -18,17 +18,19 @@ impl WasmModule {
         name: String,
         params: Vec<Type>,
         results: Vec<Type>,
+        locals: Vec<Type>,
         code: Vec<Instruction>,
     ) {
         self.types.push((params, results));
         let index = self.functions.len();
         self.exports.push(Export { name, index });
-        self.functions.push(Function { code });
+        self.functions.push(Function { locals, code });
     }
 }
 
 struct Function {
     code: Vec<Instruction>,
+    locals: Vec<Type>,
 }
 
 struct Export {
@@ -43,10 +45,11 @@ where
     buffer: &'w mut W,
 }
 
+#[derive(Clone, PartialEq)]
 pub enum Type {
     I32,
-    I64,
-    F32,
+    // I64,
+    // F32,
     F64,
 }
 
@@ -99,8 +102,8 @@ where
     fn write_type(&mut self, typ: &Type) -> Result<(), std::io::Error> {
         match typ {
             Type::I32 => self.write_byte(0x7f)?,
-            Type::I64 => self.write_byte(0x7e)?,
-            Type::F32 => self.write_byte(0x7d)?,
+            // Type::I64 => self.write_byte(0x7e)?,
+            // Type::F32 => self.write_byte(0x7d)?,
             Type::F64 => self.write_byte(0x7c)?,
         }
         Ok(())
@@ -169,16 +172,22 @@ where
     }
 
     fn write_header(&mut self) -> Result<(), std::io::Error> {
-        self.buffer.write(b"\x00asm")?;
+        self.buffer.write_all(b"\x00asm")?;
         self.write_u32(1)?;
         Ok(())
     }
 
     fn write_function_def(&mut self, function: &Function) -> Result<(), std::io::Error> {
         // Write locals:
-        let num_locals = 0; // TODO: locals
+        let num_locals = function.locals.len() as u32;
         self.write_vu32(num_locals)?;
+        for local_type in &function.locals {
+            // TODO: group by local type.
+            self.write_vu32(1)?;
+            self.write_type(local_type)?;
+        }
 
+        // Emit opcodes:
         for opcode in &function.code {
             self.write_instruction(opcode)?;
         }
@@ -191,7 +200,7 @@ where
 
     fn write_instruction(&mut self, opcode: &Instruction) -> Result<(), std::io::Error> {
         match opcode {
-            Instruction::Nop => self.write_byte(0x01)?,
+            // Instruction::Nop => self.write_byte(0x01)?,
             Instruction::Block => {
                 self.write_byte(0x02)?;
                 self.write_byte(0x40)?;
@@ -206,16 +215,27 @@ where
             }
             Instruction::Else => self.write_byte(0x05)?,
             Instruction::End => self.write_byte(0x0B)?,
-            Instruction::Br(label) => {
-                self.write_byte(0x0C)?;
-                self.write_index(*label)?;
-            }
+            // Instruction::Br(label) => {
+            //     self.write_byte(0x0C)?;
+            //     self.write_index(*label)?;
+            // }
             Instruction::BrIf(label) => {
                 self.write_byte(0x0D)?;
                 self.write_index(*label)?;
             }
+            Instruction::Call(func) => {
+                self.write_byte(0x10)?;
+                self.write_index(*func)?;
+            }
+            Instruction::Drp => {
+                self.write_byte(0x1A)?;
+            }
             Instruction::LocalGet(index) => {
                 self.write_byte(0x20)?;
+                self.write_index(*index)?;
+            }
+            Instruction::LocalSet(index) => {
+                self.write_byte(0x21)?;
                 self.write_index(*index)?;
             }
             Instruction::Return => {
@@ -224,6 +244,10 @@ where
             Instruction::I32Const(value) => {
                 self.write_byte(0x41)?;
                 self.write_vi32(*value)?;
+            }
+            Instruction::F64Const(value) => {
+                self.write_byte(0x44)?;
+                self.write_f64(*value)?;
             }
             Instruction::I32Eqz => {
                 self.write_byte(0x45)?;
@@ -246,6 +270,20 @@ where
             Instruction::I32GeS => {
                 self.write_byte(0x4E)?;
             }
+
+            Instruction::F64Lt => {
+                self.write_byte(0x63)?;
+            }
+            Instruction::F64Gt => {
+                self.write_byte(0x64)?;
+            }
+            Instruction::F64Le => {
+                self.write_byte(0x65)?;
+            }
+            Instruction::F64Ge => {
+                self.write_byte(0x66)?;
+            }
+
             Instruction::I32Add => {
                 self.write_byte(0x6A)?;
             }
@@ -254,6 +292,29 @@ where
             }
             Instruction::I32Mul => {
                 self.write_byte(0x6C)?;
+            }
+            Instruction::I32DivS => {
+                self.write_byte(0x6D)?;
+            }
+
+            Instruction::I32And => {
+                self.write_byte(0x71)?;
+            }
+            Instruction::I32Or => {
+                self.write_byte(0x72)?;
+            }
+
+            Instruction::F64Add => {
+                self.write_byte(0xA0)?;
+            }
+            Instruction::F64Sub => {
+                self.write_byte(0xA1)?;
+            }
+            Instruction::F64Mul => {
+                self.write_byte(0xA2)?;
+            }
+            Instruction::F64Div => {
+                self.write_byte(0xA3)?;
             }
         }
 
@@ -298,9 +359,15 @@ where
         Ok(())
     }
 
+    fn write_f64(&mut self, value: f64) -> Result<(), std::io::Error> {
+        use scroll::{IOwrite, LE};
+        self.buffer.iowrite_with(value, LE)?;
+        Ok(())
+    }
+
     fn write_byte(&mut self, byte: u8) -> Result<(), std::io::Error> {
         // debug!("Byte: {:02X}", byte);
-        self.buffer.write(&[byte])?;
+        self.buffer.write_all(&[byte])?;
         Ok(())
     }
 }
@@ -313,18 +380,21 @@ pub fn write_wasm<W: std::io::Write>(wasm: WasmModule, buf: &mut W) -> Result<()
 
 #[derive(Debug)]
 pub enum Instruction {
-    Nop,
+    // Nop,
     Block,
     Loop,
     If,
     Else,
     End,
-    Br(usize),
+    // Br(usize),
     BrIf(usize),
+    Call(usize),
+    Drp,
     LocalGet(usize),
-    // LocalSet(usize),
+    LocalSet(usize),
     // LocalTee(usize),
     I32Const(i32),
+    F64Const(f64),
     I32Eqz,
     I32Eq,
     I32Ne,
@@ -336,8 +406,20 @@ pub enum Instruction {
     // I32Le_u,
     I32GeS,
     // I32Ge_u,
+    F64Lt,
+    F64Gt,
+    F64Le,
+    F64Ge,
     I32Add,
     I32Sub,
     I32Mul,
+    I32DivS,
+    I32And,
+    I32Or,
+
+    F64Add,
+    F64Sub,
+    F64Mul,
+    F64Div,
     Return,
 }

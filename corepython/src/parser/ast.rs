@@ -1,11 +1,18 @@
+use super::Location;
+
 pub struct Program {
-    pub functions: Vec<FunctionDef>,
+    pub top_levels: Vec<TopLevel>,
+}
+
+pub enum TopLevel {
+    Import { module: String, name: String },
+    FunctionDef(FunctionDef),
 }
 
 pub struct FunctionDef {
     pub name: String,
     pub parameters: Vec<Parameter>,
-    pub result: Expression,
+    pub result: Option<Expression>,
     pub body: Suite,
 }
 
@@ -32,12 +39,30 @@ pub enum Statement {
         iter: Box<Expression>,
         suite: Box<Suite>,
     },
+    Assignment {
+        target: String,
+        value: Box<Expression>,
+    },
+    Expression(Expression),
+    // AugmentAssignment {
+    //     target: String,
+    //     op: BinaryOperation,
+    //     value: Box<Expression>,
+    // },
     Break,
     Continue,
 }
 
-pub enum Expression {
+pub struct Expression {
+    pub location: Location,
+    pub kind: ExpressionType,
+}
+
+pub enum ExpressionType {
     Number(i32),
+    Float(f64),
+    Str(String),
+    // Bool(bool),
     Identifier(String),
     Comparison {
         a: Box<Expression>,
@@ -49,14 +74,32 @@ pub enum Expression {
         op: BinaryOperation,
         b: Box<Expression>,
     },
+    BoolOp {
+        a: Box<Expression>,
+        op: BooleanOperator,
+        b: Box<Expression>,
+    },
+    Call {
+        callee: Box<Expression>,
+        arguments: Vec<Expression>,
+    },
 }
 
+#[derive(Clone)]
+pub enum BooleanOperator {
+    And,
+    Or,
+}
+
+#[derive(Clone)]
 pub enum BinaryOperation {
     Add,
     Sub,
     Mul,
+    Div,
 }
 
+#[derive(Clone)]
 pub enum Comparison {
     Lt,
     Gt,

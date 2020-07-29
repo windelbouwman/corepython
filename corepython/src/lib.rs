@@ -5,27 +5,29 @@
 #[macro_use]
 extern crate log;
 
-mod ast;
+mod analyze;
 mod compile;
-mod lexer;
+mod error;
 mod parser;
-mod token;
 mod wasm;
 
-use lalrpop_util::lalrpop_mod;
-
-lalrpop_mod!(pub corepython);
-
 use compile::compile_ast;
+use error::CompilationError;
 use parser::parse_python;
 use wasm::write_wasm;
 
-/// Single function
-pub fn python_to_wasm<W>(source: &str, dest: &mut W)
+/// Single exposed function.
+///
+/// This library function takes python-ish sourcecode and transforms it into WebAssembly.
+pub fn python_to_wasm<W>(source: &str, dest: &mut W) -> Result<(), CompilationError>
 where
     W: std::io::Write,
 {
-    let ast = parse_python(source);
-    let wasm_module = compile_ast(ast);
-    write_wasm(wasm_module, dest).unwrap();
+    let ast = parse_python(source)?;
+    let wasm_module = compile_ast(ast)?;
+    write_wasm(wasm_module, dest).map_err(|e| CompilationError {
+        location: None,
+        message: e.to_string(),
+    })?;
+    Ok(())
 }

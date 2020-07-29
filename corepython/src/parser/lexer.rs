@@ -1,7 +1,26 @@
+//! Python sourcecode lexer.
+//!
+//! This file processes python source text and produces tokens.
+//!
+//! Strategy is to use a lexer generator, and then post process
+//! those tokens into our own tokens.
+//!
+//! Post processing steps:
+//! - White space handling: create indent and dedent tokens.
+//! - Newline counting (for proper source locations)
+//! - Detection of keywords
+
+use super::location::Location;
 use super::token::Token;
 use logos::{Lexer, Logos};
 use std::collections::HashMap;
 use std::str::FromStr;
+
+fn shrink_string(mut txt: String) -> String {
+    txt.pop();
+    txt.remove(0);
+    txt
+}
 
 #[derive(Logos, Debug, Clone)]
 pub enum LogosToken {
@@ -11,6 +30,18 @@ pub enum LogosToken {
     #[regex("[0-9]+", |l| i32::from_str(l.slice()))]
     Number(i32),
 
+    #[regex(r"[0-9]+\.[0-9]+", |l| f64::from_str(l.slice()))]
+    Float(f64),
+
+    #[regex(r#"""".+""""#, |l| l.slice().to_string())]
+    LongString(String),
+
+    #[regex("'[^']+'", |l| shrink_string(l.slice().to_string()))]
+    SmallString(String),
+
+    #[regex(r#"#.+\n"#, |l| l.slice().to_string())]
+    Comment(String),
+
     #[token(":")]
     Colon,
 
@@ -19,6 +50,18 @@ pub enum LogosToken {
 
     #[token(")")]
     ClosingParenthesis,
+
+    #[token("[")]
+    OpeningBracket,
+
+    #[token("]")]
+    ClosingBracket,
+
+    #[token("{")]
+    OpeningBrace,
+
+    #[token("}")]
+    ClosingBrace,
 
     #[token(",")]
     Comma,
@@ -31,6 +74,9 @@ pub enum LogosToken {
 
     #[token("*")]
     Asterix,
+
+    #[token("/")]
+    Slash,
 
     #[token("<")]
     Less,
@@ -50,6 +96,9 @@ pub enum LogosToken {
     #[token("!=")]
     NotEqual,
 
+    #[token("=")]
+    Equal,
+
     #[token("->")]
     Arrow,
 
@@ -64,19 +113,6 @@ pub enum LogosToken {
 
     #[error]
     Error,
-}
-
-/// Location in the source file.
-#[derive(Clone, Debug, Default)]
-pub struct Location {
-    pub row: usize,
-    pub column: usize,
-}
-
-impl Location {
-    pub fn get_text_for_user(&self) -> String {
-        format!("<filename>:{}:{}", self.row, self.column)
-    }
 }
 
 #[derive(Debug)]
@@ -109,7 +145,9 @@ fn get_keyword_map() -> HashMap<String, Token> {
     keywords.insert("def".to_owned(), Token::KeywordDef);
     keywords.insert("else".to_owned(), Token::KeywordElse);
     keywords.insert("for".to_owned(), Token::KeywordFor);
+    keywords.insert("from".to_owned(), Token::KeywordFrom);
     keywords.insert("if".to_owned(), Token::KeywordIf);
+    keywords.insert("import".to_owned(), Token::KeywordImport);
     keywords.insert("in".to_owned(), Token::KeywordIn);
     keywords.insert("or".to_owned(), Token::KeywordOr);
     keywords.insert("return".to_owned(), Token::KeywordReturn);
@@ -153,7 +191,10 @@ impl<'t> MyLexer<'t> {
         }
 
         // Emit current span:
-        let span = self.inner.span();
+        self.emit_spanned(token, self.inner.span());
+    }
+
+    fn emit_spanned(&mut self, token: Token, span: logos::Span) {
         let spanned = (
             self.get_location(span.start),
             token,
@@ -164,16 +205,22 @@ impl<'t> MyLexer<'t> {
 
     /// Do indent / dedent book keepings
     fn update_indentation(&mut self, new_indentation: usize) {
-        if new_indentation > self.get_current_indentation() {
-            self.indent(new_indentation);
-        } else if new_indentation < self.get_current_indentation() {
-            while new_indentation < self.get_current_indentation() {
-                self.dedent();
-            }
+        use std::cmp::Ordering;
 
-            if new_indentation != self.get_current_indentation() {
-                panic!("Indentation error.");
+        match new_indentation.cmp(&self.get_current_indentation()) {
+            Ordering::Greater => {
+                self.indent(new_indentation);
             }
+            Ordering::Less => {
+                while new_indentation < self.get_current_indentation() {
+                    self.dedent();
+                }
+
+                if new_indentation != self.get_current_indentation() {
+                    panic!("Indentation error.");
+                }
+            }
+            Ordering::Equal => {}
         }
     }
 
@@ -194,12 +241,22 @@ impl<'t> MyLexer<'t> {
                 LogosToken::Plus => self.emit(Token::Plus),
                 LogosToken::Arrow => self.emit(Token::Arrow),
                 LogosToken::Asterix => self.emit(Token::Asterix),
+                LogosToken::Slash => self.emit(Token::Slash),
                 LogosToken::Less => self.emit(Token::Less),
                 LogosToken::Greater => self.emit(Token::Greater),
                 LogosToken::LessEqual => self.emit(Token::LessEqual),
                 LogosToken::GreaterEqual => self.emit(Token::GreaterEqual),
                 LogosToken::EqualEqual => self.emit(Token::EqualEqual),
                 LogosToken::NotEqual => self.emit(Token::NotEqual),
+                LogosToken::Equal => self.emit(Token::Equal),
+                LogosToken::OpeningBracket => {
+                    self.parenthesis_level += 1;
+                    self.emit(Token::OpeningBracket);
+                }
+                LogosToken::ClosingBracket => {
+                    self.parenthesis_level -= 1;
+                    self.emit(Token::ClosingBracket);
+                }
                 LogosToken::OpeningParenthesis => {
                     self.parenthesis_level += 1;
                     self.emit(Token::OpeningParenthesis);
@@ -208,11 +265,16 @@ impl<'t> MyLexer<'t> {
                     self.parenthesis_level -= 1;
                     self.emit(Token::ClosingParenthesis);
                 }
+                LogosToken::OpeningBrace => {
+                    self.parenthesis_level += 1;
+                    self.emit(Token::OpeningBrace);
+                }
+                LogosToken::ClosingBrace => {
+                    self.parenthesis_level += 1;
+                    self.emit(Token::ClosingBrace);
+                }
                 LogosToken::NewLine => {
-                    self.at_bol = true;
-                    self.column_offset = self.inner.span().end;
-                    self.spaces = 0;
-                    self.row += 1;
+                    self.newline();
                 }
                 LogosToken::BackslashNewLine => {
                     // Hmm, special action when backslash at end of line  .....
@@ -232,6 +294,16 @@ impl<'t> MyLexer<'t> {
                     }
                 }
                 LogosToken::Number(value) => self.emit(Token::Number { value }),
+                LogosToken::Float(value) => self.emit(Token::Float { value }),
+                LogosToken::LongString(value) | LogosToken::SmallString(value) => {
+                    // pha, ignore for now. Assume docstring
+                    // warn!("Ignoring assumed doc-string {}", value);
+                    self.emit(Token::Str { value })
+                }
+                LogosToken::Comment(_) => {
+                    // info!("Skipping comment {}", value);
+                    self.newline();
+                }
                 LogosToken::Error => {
                     let location = self.get_location(self.inner.span().start);
                     return Err(LexicalError {
@@ -250,6 +322,17 @@ impl<'t> MyLexer<'t> {
         }
 
         Ok(())
+    }
+
+    fn newline(&mut self) {
+        if !self.at_bol {
+            let span = self.inner.span();
+            self.emit_spanned(Token::NewLine, span);
+        }
+        self.at_bol = true;
+        self.column_offset = self.inner.span().end;
+        self.spaces = 0;
+        self.row += 1;
     }
 
     fn indent(&mut self, new_indentation: usize) {

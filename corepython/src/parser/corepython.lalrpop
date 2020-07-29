@@ -1,0 +1,250 @@
+// Core python language, nothing fancy, keep it simple.
+
+use super::{ast, lexer, location};
+use super::token::Token;
+
+grammar;
+
+pub Program: ast::Program = {
+    <top_levels:TopLevel*> => {
+        ast::Program { top_levels }
+    },
+};
+
+TopLevel: ast::TopLevel = {
+    "from" <module:Identifier> "import" <name:Identifier> NewLine => {
+        ast::TopLevel::Import { module, name }
+    },
+    <functiondef:FunctionDef> => {
+        ast::TopLevel::FunctionDef(functiondef)
+    },
+};
+
+FunctionDef: ast::FunctionDef = {
+    "def" <name:Identifier> "(" <parameters:Comma<FunctionParameter>> ")" <result:ReturnAnnotation?> ":" <body:Suite> => {
+        ast::FunctionDef { name, parameters, result, body }
+    }
+};
+
+ReturnAnnotation: ast::Expression = {
+    "->" <result:Expression> => result,
+};
+
+FunctionParameter: ast::Parameter = {
+    <name:Identifier> ":" <typ:Expression> => {
+        ast::Parameter { name, typ }
+    }
+};
+
+Suite: Vec<ast::Statement> = {
+    NewLine Indent <statements:Statement+> Dedent => statements
+};
+
+Statement: ast::Statement = {
+    CompoundStatement,
+    <s:SimpleStatement> NewLine => s,
+};
+
+CompoundStatement: ast::Statement = {
+    "if" <condition:Test> ":" <suite:Suite> "else" ":" <else_suite:Suite> => {
+        ast::Statement::If { condition: Box::new(condition), suite: Box::new(suite), else_suite: Box::new(else_suite) }
+    },
+    "while" <condition:Test> ":" <suite:Suite> => {
+        ast::Statement::While { condition: Box::new(condition), suite: Box::new(suite) }
+    },
+    "for" <target:Identifier> "in" <iter:Expression> ":" <suite:Suite> => {
+        ast::Statement::For { target, iter: Box::new(iter), suite: Box::new(suite) }
+    },
+};
+
+SimpleStatement: ast::Statement = {
+    "break" => ast::Statement::Break,
+    "continue" => ast::Statement::Continue,
+    <i:Identifier> "=" <e:Expression> => {
+        ast::Statement::Assignment { target: i, value: Box::new(e) }
+    },
+    "return" <expr:Expression> => {
+        ast::Statement::Return(expr)
+    },
+    <e:Expression> => {
+        ast::Statement::Expression(e)
+    },
+}
+
+Test: ast::Expression = {
+    OrTest,
+};
+
+OrTest: ast::Expression = {
+    <a:AndTest> <location:@L> "or" <b:AndTest> => {
+        ast::Expression {
+            location,
+            kind: ast::ExpressionType::BoolOp { a: Box::new(a), op: ast::BooleanOperator::Or, b: Box::new(b) }
+        }
+    },
+    AndTest,
+};
+
+AndTest: ast::Expression = {
+    <a:Comparison> <location:@L> "and" <b:Comparison> => {
+        ast::Expression {
+            location,
+            kind: ast::ExpressionType::BoolOp { a: Box::new(a), op: ast::BooleanOperator::And, b: Box::new(b) }
+        }
+    },
+    Comparison,
+};
+
+Comparison: ast::Expression = {
+    <e1:Expression> <location:@L> <op:ComparisonOperator> <e2:Expression> => {
+        ast::Expression {
+            location,
+            kind: ast::ExpressionType::Comparison { a: Box::new(e1), op, b: Box::new(e2) }
+        }
+    }
+};
+
+ComparisonOperator: ast::Comparison = {
+    "<" => ast::Comparison::Lt,
+    ">" => ast::Comparison::Gt,
+    "<=" => ast::Comparison::Le,
+    ">=" => ast::Comparison::Ge,
+    "==" => ast::Comparison::Equal,
+    "!=" => ast::Comparison::NotEqual,
+};
+
+Expression: ast::Expression = {
+    ArithmatricExpression,
+};
+
+ArithmatricExpression: ast::Expression = {
+    <a:ArithmatricExpression> <location:@L> <op:AddOp> <b:Term> => {
+        ast::Expression {
+            location,
+            kind: ast::ExpressionType::BinaryOperation { a: Box::new(a), op, b: Box::new(b) }
+        }
+    },
+    Term,
+};
+
+AddOp: ast::BinaryOperation = {
+    "+" => ast::BinaryOperation::Add,
+    "-" => ast::BinaryOperation::Sub,
+};
+
+Term: ast::Expression = {
+    <a:Term> <location:@L> <op:MulOp> <b:Factor> => {
+        ast::Expression {
+            location,
+            kind: ast::ExpressionType::BinaryOperation { a: Box::new(a), op, b: Box::new(b) }
+        }
+    },
+    Factor,
+};
+
+MulOp: ast::BinaryOperation = {
+    "*" => ast::BinaryOperation::Mul,
+    "/" => ast::BinaryOperation::Div,
+};
+
+Factor: ast::Expression = {
+    Atom,
+};
+
+Atom: ast::Expression = {
+    <location:@L> <n:Number> => {
+        ast::Expression {
+            location,
+            kind: ast::ExpressionType::Number(n)
+        }
+    },
+    <location:@L> <n:Float> => {
+        ast::Expression {
+            location,
+            kind: ast::ExpressionType::Float(n)
+        }
+    },
+    <location:@L> <n:Str> => {
+        ast::Expression {
+            location,
+            kind: ast::ExpressionType::Str(n)
+        }
+    },
+    // <n:Bool> => ast::Expression::Bool(n),
+    <location:@L> <n:Identifier> => {
+        ast::Expression {
+            location,
+            kind: ast::ExpressionType::Identifier(n)
+        }
+    },
+    <location:@L> <callee:Atom> "(" <arguments:Comma<Expression>> ")" => {
+        let callee = Box::new(callee);
+        ast::Expression {
+            location,
+            kind: ast::ExpressionType::Call { callee, arguments }
+        }
+    },
+};
+
+#[inline]
+Comma<T>: Vec<T> = {
+    <items: (<T> ",")*> <last: T?> => {
+        let mut items = items;
+        items.extend(last);
+        items
+    }
+};
+
+#[inline]
+OneOrMore<T>: Vec<T> = {
+    <i1: T> <i2:("," T)*> => {
+        let mut items = vec![i1];
+        items.extend(i2.into_iter().map(|e| e.1));
+        items
+    }
+};
+
+extern {
+    type Location = location::Location;
+    type Error = lexer::LexicalError;
+
+    enum Token {
+        Number => Token::Number { value: <i32> },
+        Float => Token::Float { value: <f64> },
+        Str => Token::Str { value: <String> },
+        Identifier => Token::Identifier { value: <String> },
+        Indent => Token::Indent,
+        Dedent => Token::Dedent,
+        NewLine => Token::NewLine,
+        "and" => Token::KeywordAnd,
+        "or" => Token::KeywordOr,
+        "break" => Token::KeywordBreak,
+        "continue" => Token::KeywordContinue,
+        "def" => Token::KeywordDef,
+        "else" => Token::KeywordElse,
+        "for" => Token::KeywordFor,
+        "from" => Token::KeywordFrom,
+        "if" => Token::KeywordIf,
+        "in" => Token::KeywordIn,
+        "import" => Token::KeywordImport,
+        "or" => Token::KeywordOr,
+        "return" => Token::KeywordReturn,
+        "while" => Token::KeywordWhile,
+        "(" => Token::OpeningParenthesis,
+        ")" => Token::ClosingParenthesis,
+        "," => Token::Comma,
+        ":" => Token::Colon,
+        "+" => Token::Plus,
+        "*" => Token::Asterix,
+        "/" => Token::Slash,
+        "<" => Token::Less,
+        ">" => Token::Greater,
+        "<=" => Token::LessEqual,
+        ">=" => Token::GreaterEqual,
+        "==" => Token::EqualEqual,
+        "!=" => Token::NotEqual,
+        "=" => Token::Equal,
+        "-" => Token::Minus,
+        "->" => Token::Arrow,
+    }
+}
