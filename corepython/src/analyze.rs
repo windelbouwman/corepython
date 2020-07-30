@@ -15,17 +15,19 @@ pub fn analyze(prog: ast::Program) -> Result<Program, CompilationError> {
 
 pub enum Symbol {
     Parameter {
-        name: String,
-        typ: Type,
+        parameter: Rc<Parameter>,
         index: usize,
     },
 
     Local {
-        typ: Type,
+        local: Rc<Local>,
         index: usize,
     },
     Function {
         function: Rc<Function>,
+        index: usize,
+    },
+    ExternFunction {
         index: usize,
     },
     // TODO:
@@ -42,25 +44,38 @@ pub enum Symbol {
 impl Symbol {
     fn get_type(&self) -> &Type {
         match self {
-            Symbol::Parameter { typ, .. } => typ,
-            Symbol::Local { typ, .. } => typ,
-            Symbol::Function { function, .. } => {
+            Symbol::Parameter { parameter, .. } => &parameter.typ,
+            Symbol::Local { local, .. } => &local.typ,
+            Symbol::Function { .. } => {
                 unimplemented!("TODO!");
                 // &function.as_ref().return_type.unwrap()
+            }
+            Symbol::ExternFunction { .. } => {
+                unimplemented!();
             }
         }
     }
 }
 
+pub struct Parameter {
+    pub name: String,
+    pub typ: Type,
+}
+
+pub struct Local {
+    pub name: String,
+    pub typ: Type,
+}
+
 pub struct Program {
     pub functions: Vec<Rc<Function>>,
-    imports: Vec<String>,
+    pub imports: Vec<String>,
 }
 
 pub struct Function {
     pub name: String,
-    pub parameters: Vec<Rc<Symbol>>,
-    pub locals: Vec<Rc<Symbol>>,
+    pub parameters: Vec<Rc<Parameter>>,
+    pub locals: Vec<Rc<Local>>,
     pub body: Suite,
     pub return_type: Option<Type>,
 }
@@ -140,7 +155,7 @@ pub enum Type {
 
 pub struct Scope {
     pub variables: HashMap<String, Rc<Symbol>>,
-    pub locals: Vec<Rc<Symbol>>,
+    pub locals: Vec<Rc<Local>>,
     // parent: Option<Rc<Scope>>,
 }
 
@@ -193,9 +208,10 @@ impl Analyzer {
                     // arg
                     // TODO!
                     info!("Importing {}.{}", module, name);
+                    let index = imports.len();
                     imports.push(name.clone());
-                    // let symbol = Symbol::Import {};
-                    // self.define(name, symbol);
+                    let symbol = Symbol::ExternFunction { index };
+                    self.define(name, Rc::new(symbol));
                 }
             }
         }
@@ -227,13 +243,16 @@ impl Analyzer {
         let mut parameters = vec![];
         for (index, parameter) in function_def.parameters.iter().enumerate() {
             let param_type = self.get_type(&parameter.typ)?;
-            let symbol = Rc::new(Symbol::Parameter {
+            let param = Rc::new(Parameter {
                 name: parameter.name.clone(),
                 typ: param_type,
+            });
+            let symbol = Rc::new(Symbol::Parameter {
+                parameter: param.clone(),
                 index,
             });
             self.define(&parameter.name, symbol.clone());
-            parameters.push(symbol);
+            parameters.push(param);
         }
 
         let return_type = match &function_def.result {
@@ -444,8 +463,15 @@ impl Analyzer {
 
     fn new_local(&mut self, name: &str, typ: Type) {
         let index = self.get_scope_mut().variables.len();
-        let symbol = Rc::new(Symbol::Local { typ, index });
-        self.get_scope_mut().locals.push(symbol.clone());
+        let local = Rc::new(Local {
+            name: name.to_string(),
+            typ,
+        });
+        let symbol = Rc::new(Symbol::Local {
+            local: local.clone(),
+            index,
+        });
+        self.get_scope_mut().locals.push(local);
         self.define(name, symbol);
     }
 
@@ -460,10 +486,10 @@ impl Analyzer {
     fn lookup(&self, name: &str) -> Option<Rc<Symbol>> {
         for scope in self.scopes.iter().rev() {
             if scope.contains(name) {
-                println!("Got symbol!");
+                // println!("Got symbol!");
                 return Some(scope.lookup(name).clone());
             } else {
-                println!("Looking further!");
+                // println!("Looking further!");
             }
         }
         None

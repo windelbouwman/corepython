@@ -14,6 +14,7 @@ pub fn compile_ast(prog: ast::Program) -> Result<wasm::WasmModule, CompilationEr
 /// Helper struct to compile a typed and resolved program to WebAssembly.
 struct Compiler {
     code: Vec<wasm::Instruction>,
+    func_offset: usize,
     module: wasm::WasmModule,
 }
 
@@ -21,11 +22,23 @@ impl Compiler {
     fn new() -> Self {
         Compiler {
             code: vec![],
+            func_offset: 0,
             module: wasm::WasmModule::new(),
         }
     }
 
     fn compile_prog(mut self, prog: &analyze::Program) -> wasm::WasmModule {
+        for import in &prog.imports {
+            let modname = "x";
+            warn!(
+                "Assuming imported function {}.{} has signature i32 -> i32",
+                modname, import
+            );
+            let (params, results) = (vec![wasm::Type::I32], vec![wasm::Type::I32]);
+            self.module.add_import(modname, import, params, results);
+        }
+        self.func_offset += prog.imports.len();
+
         for function in &prog.functions {
             self.compile_function(function);
         }
@@ -54,19 +67,8 @@ impl Compiler {
 
         let mut params = vec![];
         for parameter in &function.parameters {
-            match parameter.as_ref() {
-                analyze::Symbol::Parameter {
-                    name: _,
-                    typ,
-                    index: _,
-                } => {
-                    let param_type = self.get_type(typ);
-                    params.push(param_type);
-                }
-                _ => {
-                    panic!("Invalid parameter!");
-                }
-            }
+            let param_type = self.get_type(&parameter.typ);
+            params.push(param_type);
         }
 
         let mut results = vec![];
@@ -76,15 +78,8 @@ impl Compiler {
 
         let mut locals: Vec<wasm::Type> = vec![];
         for local in &function.locals {
-            match local.as_ref() {
-                analyze::Symbol::Local { typ, index: _ } => {
-                    let local_type = self.get_type(typ);
-                    locals.push(local_type);
-                }
-                _ => {
-                    panic!("Invalid local!");
-                }
-            }
+            let local_type = self.get_type(&local.typ);
+            locals.push(local_type);
         }
 
         self.compile_suite(&function.body);
@@ -143,11 +138,15 @@ impl Compiler {
             }
             analyze::Statement::While { condition, suite } => {
                 self.emit(wasm::Instruction::Block);
-                self.emit(wasm::Instruction::Loop);
+
+                // pre-check if we must enter loop at all:
                 self.compile_expression(condition);
                 self.emit(wasm::Instruction::I32Eqz); // Invert condition, and branch if not good.
-                self.emit(wasm::Instruction::BrIf(1));
+                self.emit(wasm::Instruction::BrIf(0));
+                self.emit(wasm::Instruction::Loop);
                 self.compile_suite(suite);
+                self.compile_expression(condition);
+                self.emit(wasm::Instruction::BrIf(0));
                 self.emit(wasm::Instruction::End);
                 self.emit(wasm::Instruction::End);
             }
@@ -201,7 +200,8 @@ impl Compiler {
                 }
 
                 let func: usize = match callee.as_ref() {
-                    analyze::Symbol::Function { index, .. } => *index,
+                    analyze::Symbol::Function { index, .. } => *index + self.func_offset,
+                    analyze::Symbol::ExternFunction { index } => *index,
                     _ => {
                         panic!("Cannot call this!");
                     }
@@ -290,36 +290,33 @@ impl Compiler {
 
     fn store_value(&mut self, symbol: &analyze::Symbol, typ: &analyze::Type) {
         match symbol {
-            analyze::Symbol::Local {
-                typ: local_typ,
-                index,
-            }
-            | analyze::Symbol::Parameter {
-                name: _,
-                typ: local_typ,
-                index,
-            } => {
-                assert!(typ == local_typ);
+            analyze::Symbol::Local { local, index } => {
+                assert!(typ == &local.typ);
                 self.emit(wasm::Instruction::LocalSet(*index));
             }
-            analyze::Symbol::Function { .. } => {
-                panic!("Cannot store to function");
+            analyze::Symbol::Parameter { parameter, index } => {
+                assert!(typ == &parameter.typ);
+                self.emit(wasm::Instruction::LocalSet(*index));
+            }
+            analyze::Symbol::Function { .. } | analyze::Symbol::ExternFunction { .. } => {
+                panic!("Cannot store to this");
             }
         }
     }
 
     fn get_local(&mut self, symbol: &analyze::Symbol) {
         match symbol {
-            analyze::Symbol::Local { typ: _, index }
-            | analyze::Symbol::Parameter {
-                name: _,
-                typ: _,
+            analyze::Symbol::Local { local: _, index } => {
+                self.emit(wasm::Instruction::LocalGet(*index));
+            }
+            analyze::Symbol::Parameter {
+                parameter: _,
                 index,
             } => {
                 self.emit(wasm::Instruction::LocalGet(*index));
             }
-            analyze::Symbol::Function { .. } => {
-                panic!("Cannot load from function");
+            analyze::Symbol::Function { .. } | analyze::Symbol::ExternFunction { .. } => {
+                panic!("Cannot load from this");
             }
         }
     }

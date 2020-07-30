@@ -207,13 +207,18 @@ impl<'t> MyLexer<'t> {
     fn update_indentation(&mut self, new_indentation: usize) {
         use std::cmp::Ordering;
 
+        let location = Location {
+            row: self.row,
+            column: 1,
+        };
+
         match new_indentation.cmp(&self.get_current_indentation()) {
             Ordering::Greater => {
-                self.indent(new_indentation);
+                self.indent(new_indentation, location);
             }
             Ordering::Less => {
                 while new_indentation < self.get_current_indentation() {
-                    self.dedent();
+                    self.dedent(location.clone());
                 }
 
                 if new_indentation != self.get_current_indentation() {
@@ -314,10 +319,14 @@ impl<'t> MyLexer<'t> {
             };
         } else {
             self.at_end = true;
+            let location = Location {
+                row: self.row,
+                column: 1,
+            };
 
             // Flush indentations:
             while self.indentations.len() > 1 {
-                self.dedent();
+                self.dedent(location.clone());
             }
         }
 
@@ -335,14 +344,14 @@ impl<'t> MyLexer<'t> {
         self.row += 1;
     }
 
-    fn indent(&mut self, new_indentation: usize) {
+    fn indent(&mut self, new_indentation: usize, location: Location) {
         self.indentations.push(new_indentation);
-        let spanned = (Default::default(), Token::Indent, Default::default());
+        let spanned = (location.clone(), Token::Indent, location);
         self.pending.push(spanned);
     }
 
-    fn dedent(&mut self) {
-        let spanned = (Default::default(), Token::Dedent, Default::default());
+    fn dedent(&mut self, location: Location) {
+        let spanned = (location.clone(), Token::Dedent, location);
         self.pending.push(spanned);
         self.indentations.pop();
     }

@@ -1,5 +1,5 @@
 /// Location in the source file.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default, Debug)]
 pub struct Location {
     pub row: usize,
     pub column: usize,

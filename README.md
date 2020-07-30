@@ -34,9 +34,10 @@ def myAdd(a: int, b: int) -> int:
 
 Compile demo.py into a wasm file locally:
 
-    $ cargo run
+    $ cargo run -- demo.py
     $ ls demo.wasm
     $ python run_it.py
+    $ node run_demo.js
 
 Or view the wasm in the browser:
 

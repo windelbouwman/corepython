@@ -1,5 +1,6 @@
 pub struct WasmModule {
     types: Vec<(Vec<Type>, Vec<Type>)>,
+    imports: Vec<Import>,
     exports: Vec<Export>,
     functions: Vec<Function>,
 }
@@ -8,9 +9,28 @@ impl WasmModule {
     pub fn new() -> Self {
         WasmModule {
             types: vec![],
+            imports: vec![],
             exports: vec![],
             functions: vec![],
         }
+    }
+
+    pub fn add_import(&mut self, modname: &str, name: &str, params: Vec<Type>, results: Vec<Type>) {
+        // TODO: determine type of imported function.
+        let type_index = self.add_type(params, results);
+
+        self.imports.push(Import {
+            modname: modname.to_owned(),
+            name: name.to_owned(),
+            kind: ImportType::Func(type_index),
+        });
+    }
+
+    fn add_type(&mut self, params: Vec<Type>, results: Vec<Type>) -> usize {
+        let index = self.types.len();
+        // TODO: re-use types!
+        self.types.push((params, results));
+        index
     }
 
     pub fn add_function(
@@ -21,14 +41,33 @@ impl WasmModule {
         locals: Vec<Type>,
         code: Vec<Instruction>,
     ) {
-        self.types.push((params, results));
-        let index = self.functions.len();
+        let type_index = self.add_type(params, results);
+
+        // Meh: kind of sucks to add import.len here:
+        let index = self.functions.len() + self.imports.len();
+
         self.exports.push(Export { name, index });
-        self.functions.push(Function { locals, code });
+        self.functions.push(Function {
+            type_index,
+            locals,
+            code,
+        });
     }
 }
 
+struct Import {
+    modname: String,
+    name: String,
+    kind: ImportType,
+}
+
+enum ImportType {
+    Func(usize),
+}
+
 struct Function {
+    /// Type index:
+    type_index: usize,
     code: Vec<Instruction>,
     locals: Vec<Type>,
 }
@@ -65,6 +104,7 @@ where
         self.write_header()?;
 
         self.write_type_section(&wasm)?;
+        self.write_import_section(&wasm)?;
         self.write_func_section(&wasm)?;
         self.write_export_section(&wasm)?;
         self.write_code_section(&wasm)?;
@@ -109,6 +149,30 @@ where
         Ok(())
     }
 
+    fn write_import_section(&mut self, module: &WasmModule) -> Result<(), std::io::Error> {
+        let mut buf: Vec<u8> = vec![];
+        let mut w2 = Writer::new(&mut buf);
+        w2.write_imports(module)?;
+        self.write_section(2, &buf)?;
+        Ok(())
+    }
+
+    fn write_imports(&mut self, module: &WasmModule) -> Result<(), std::io::Error> {
+        let num_imports: u32 = module.imports.len() as u32;
+        self.write_vu32(num_imports)?;
+        for import in &module.imports {
+            self.write_str(&import.modname)?;
+            self.write_str(&import.name)?;
+            match import.kind {
+                ImportType::Func(type_index) => {
+                    self.write_byte(0)?;
+                    self.write_index(type_index)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn write_func_section(&mut self, module: &WasmModule) -> Result<(), std::io::Error> {
         let mut buf: Vec<u8> = vec![];
         let mut w2 = Writer::new(&mut buf);
@@ -121,8 +185,8 @@ where
 
     fn write_function_protos(&mut self, module: &WasmModule) -> Result<(), std::io::Error> {
         self.write_vu32(module.functions.len() as u32)?;
-        for (index, _function) in module.functions.iter().enumerate() {
-            self.write_index(index)?;
+        for function in &module.functions {
+            self.write_index(function.type_index)?;
         }
         Ok(())
     }
