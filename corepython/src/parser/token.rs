@@ -14,6 +14,7 @@ pub enum Token {
     KeywordIn,
     KeywordImport,
     KeywordOr,
+    KeywordPass,
     KeywordReturn,
     KeywordWhile,
     Identifier { value: String },

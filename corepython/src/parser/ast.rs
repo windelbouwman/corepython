@@ -7,6 +7,7 @@ pub struct Program {
 pub enum TopLevel {
     Import { module: String, name: String },
     FunctionDef(FunctionDef),
+    ClassDef(ClassDef),
 }
 
 pub struct FunctionDef {
@@ -14,6 +15,11 @@ pub struct FunctionDef {
     pub parameters: Vec<Parameter>,
     pub result: Option<Expression>,
     pub body: Suite,
+}
+
+pub struct ClassDef {
+    pub name: String,
+    pub methods: Vec<FunctionDef>,
 }
 
 type Suite = Vec<Statement>;
@@ -51,6 +57,7 @@ pub enum Statement {
     // },
     Break,
     Continue,
+    Pass,
 }
 
 pub struct Expression {

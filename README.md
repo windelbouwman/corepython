@@ -9,6 +9,10 @@ Features:
 - Very minimal subset of the Python language. Only the core of it, nothing fancy.
 - CorePython compiler itself is embeddable in browser (small WebAssembly download).
 
+# Phase
+
+This project is in prototype phase.
+
 # Usage
 
 First clone this repository, and check the Python to WebAssembly compiler options:
@@ -51,6 +55,24 @@ CorePython, and use it client side:
     $ cd www
     $ npm install
     $ npm run start
+
+# Performance
+
+Well, okay, that's nice, but how fast is it?
+
+Good question! I did some completely non-scientific early tests with
+the mandelbrot example (`mandel.py`). Compiled it to WebAssembly and
+ran it with both node and ppci.
+
+- Python version: 17 ms.
+- Python -> WebAssembly -> native (using ppci): 2.7 ms.
+- Python -> WebAssembly -> node: 20 ms.
+
+You can try this using the `run_mandel.js` and `run_mandel.py` scripts:
+
+    $ cargo run -- mandel.py  # Compile mandel.py
+    $ python run_mandel.py
+    $ node run_mandel.js
 
 # Design topics
 
@@ -100,8 +122,13 @@ in some way.
 
 # Planning
 
-- Simple types, `int`, `float` and functions.
-- `str` support
+- [x] Python `int` support.
+- [x] Python `float` support.
+- [x] function `def` support.
+- [ ] Python `str` support.
+- [ ] Python `list` support.
+- [ ] Python `class` support.
+- [ ] The rest (TM).
 
 # Motivation
 

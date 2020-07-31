@@ -158,6 +158,7 @@ fn get_keyword_map() -> HashMap<String, Token> {
     keywords.insert("import".to_owned(), Token::KeywordImport);
     keywords.insert("in".to_owned(), Token::KeywordIn);
     keywords.insert("or".to_owned(), Token::KeywordOr);
+    keywords.insert("pass".to_owned(), Token::KeywordPass);
     keywords.insert("return".to_owned(), Token::KeywordReturn);
     keywords.insert("while".to_owned(), Token::KeywordWhile);
     keywords

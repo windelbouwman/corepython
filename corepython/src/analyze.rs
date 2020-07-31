@@ -233,6 +233,9 @@ impl Analyzer {
                     let symbol = Symbol::ExternFunction { index };
                     self.define(name, Rc::new(symbol));
                 }
+                ast::TopLevel::ClassDef { .. } => {
+                    unimplemented!("TODO");
+                }
             }
         }
         self.leave_scope();
@@ -375,6 +378,9 @@ impl Analyzer {
                 suite: _,
             } => {
                 // self.compile_suite(suite)?;
+                unimplemented!();
+            }
+            ast::Statement::Pass => {
                 unimplemented!();
             }
             ast::Statement::Break => {

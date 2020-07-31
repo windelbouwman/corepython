@@ -18,6 +18,9 @@ TopLevel: ast::TopLevel = {
     <functiondef:FunctionDef> => {
         ast::TopLevel::FunctionDef(functiondef)
     },
+    <classdef:ClassDef> => {
+        ast::TopLevel::ClassDef(classdef)
+    },
 };
 
 FunctionDef: ast::FunctionDef = {
@@ -33,6 +36,12 @@ ReturnAnnotation: ast::Expression = {
 FunctionParameter: ast::Parameter = {
     <name:Identifier> ":" <typ:Expression> => {
         ast::Parameter { name, typ }
+    }
+};
+
+ClassDef: ast::ClassDef = {
+    "class" <name:Identifier> ":" NewLine Indent <methods:FunctionDef+> Dedent => {
+        ast::ClassDef { name, methods }
     }
 };
 
@@ -60,6 +69,7 @@ CompoundStatement: ast::Statement = {
 SimpleStatement: ast::Statement = {
     "break" => ast::Statement::Break,
     "continue" => ast::Statement::Continue,
+    "pass" => ast::Statement::Pass,
     <i:Identifier> "=" <e:Expression> => {
         ast::Statement::Assignment { target: i, value: Box::new(e) }
     },
@@ -224,7 +234,7 @@ extern {
         Dedent => Token::Dedent,
         NewLine => Token::NewLine,
         "and" => Token::KeywordAnd,
-        "or" => Token::KeywordOr,
+        "class" => Token::KeywordClass,
         "break" => Token::KeywordBreak,
         "continue" => Token::KeywordContinue,
         "def" => Token::KeywordDef,
@@ -235,6 +245,7 @@ extern {
         "in" => Token::KeywordIn,
         "import" => Token::KeywordImport,
         "or" => Token::KeywordOr,
+        "pass" => Token::KeywordPass,
         "return" => Token::KeywordReturn,
         "while" => Token::KeywordWhile,
         "(" => Token::OpeningParenthesis,
