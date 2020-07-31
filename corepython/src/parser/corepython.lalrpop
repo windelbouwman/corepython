@@ -184,6 +184,13 @@ Atom: ast::Expression = {
             kind: ast::ExpressionType::Call { callee, arguments }
         }
     },
+    <location:@L> <base:Atom> "[" <index:Expression> "]" => {
+        let base = Box::new(base);
+        ast::Expression {
+            location,
+            kind: ast::ExpressionType::Indexed { base, index: Box::new(index) }
+        }
+    },
 };
 
 #[inline]
@@ -232,6 +239,8 @@ extern {
         "while" => Token::KeywordWhile,
         "(" => Token::OpeningParenthesis,
         ")" => Token::ClosingParenthesis,
+        "[" => Token::OpeningBracket,
+        "]" => Token::ClosingBracket,
         "," => Token::Comma,
         ":" => Token::Colon,
         "+" => Token::Plus,

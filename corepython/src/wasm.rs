@@ -279,10 +279,10 @@ where
             }
             Instruction::Else => self.write_byte(0x05)?,
             Instruction::End => self.write_byte(0x0B)?,
-            // Instruction::Br(label) => {
-            //     self.write_byte(0x0C)?;
-            //     self.write_index(*label)?;
-            // }
+            Instruction::Br(label) => {
+                self.write_byte(0x0C)?;
+                self.write_index(*label)?;
+            }
             Instruction::BrIf(label) => {
                 self.write_byte(0x0D)?;
                 self.write_index(*label)?;
@@ -450,7 +450,7 @@ pub enum Instruction {
     If,
     Else,
     End,
-    // Br(usize),
+    Br(usize),
     BrIf(usize),
     Call(usize),
     Drp,

@@ -2,7 +2,7 @@
 from x import putc
 
 def mandel():
-    # """Print a mandelbrot fractal to the console, yielding after each character is printed"""
+    # """ Print a mandelbrot fractal to the console """
     w = 50.0
     h = 50.0
     y = 0.0
@@ -25,13 +25,13 @@ def mandel():
                 i = i + 1
 
             if Tr + Ti <= 4.0:
-                putc('*')
+                putc(ord('*'))
             else:
-                putc(' ')
+                putc(ord(' '))
 
             x = x + 1.0
 
-        putc('n')
+        putc(0xA)
         y = y + 1.0
 
 # run the mandelbrot

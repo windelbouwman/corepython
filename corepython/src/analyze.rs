@@ -30,6 +30,7 @@ pub enum Symbol {
     ExternFunction {
         index: usize,
     },
+    Builtin(Builtin),
     // TODO:
     // Type {
     //     typ: Type,
@@ -37,15 +38,19 @@ pub enum Symbol {
     // Unresolved,
 }
 
-// struct Parameter {
-
-// }
+pub enum Builtin {
+    Ord,
+    Len,
+}
 
 impl Symbol {
     fn get_type(&self) -> &Type {
         match self {
             Symbol::Parameter { parameter, .. } => &parameter.typ,
             Symbol::Local { local, .. } => &local.typ,
+            Symbol::Builtin(..) => {
+                unimplemented!("TODO!");
+            }
             Symbol::Function { .. } => {
                 unimplemented!("TODO!");
                 // &function.as_ref().return_type.unwrap()
@@ -69,7 +74,12 @@ pub struct Local {
 
 pub struct Program {
     pub functions: Vec<Rc<Function>>,
-    pub imports: Vec<String>,
+    pub imports: Vec<Import>,
+}
+
+pub struct Import {
+    pub modname: String,
+    pub name: String,
 }
 
 pub struct Function {
@@ -151,6 +161,12 @@ pub enum Type {
 
     // We do not know the type yet.
     // Unknown,
+    /// A list of certain types
+    List(Box<Type>),
+}
+
+enum TypeConstructor {
+    List,
 }
 
 pub struct Scope {
@@ -191,6 +207,7 @@ impl Analyzer {
     }
 
     fn analyze_program(mut self, prog: &ast::Program) -> Result<Program, CompilationError> {
+        self.define_intrinsics();
         self.enter_scope();
         let mut imports = vec![];
         let mut functions = vec![];
@@ -209,7 +226,10 @@ impl Analyzer {
                     // TODO!
                     info!("Importing {}.{}", module, name);
                     let index = imports.len();
-                    imports.push(name.clone());
+                    imports.push(Import {
+                        modname: module.clone(),
+                        name: name.clone(),
+                    });
                     let symbol = Symbol::ExternFunction { index };
                     self.define(name, Rc::new(symbol));
                 }
@@ -217,6 +237,16 @@ impl Analyzer {
         }
         self.leave_scope();
         Ok(Program { imports, functions })
+    }
+
+    /// Define internal functions such as len and ord.
+    fn define_intrinsics(&mut self) {
+        self.enter_scope();
+        let symbol = Symbol::Builtin(Builtin::Ord);
+        self.define("ord", Rc::new(symbol));
+
+        let symbol = Symbol::Builtin(Builtin::Len);
+        self.define("len", Rc::new(symbol));
     }
 
     /// Determine the type given a parsed expression
@@ -230,7 +260,35 @@ impl Analyzer {
                     format!("Invalid type identifier: {}", name),
                 )),
             },
+            ast::ExpressionType::Indexed { base, index } => {
+                let base = self.get_type_constructor(base)?;
+                let index = self.get_type(index)?;
+                let typ = self.apply(base, index);
+                Ok(typ)
+            }
             _ => Err(Self::new_error(typ, "Invalid type expression".to_owned())),
+        }
+    }
+
+    fn get_type_constructor(
+        &self,
+        con: &ast::Expression,
+    ) -> Result<TypeConstructor, CompilationError> {
+        match &con.kind {
+            ast::ExpressionType::Identifier(name) => match name.as_str() {
+                "list" => Ok(TypeConstructor::List),
+                name => Err(Self::new_error(
+                    con,
+                    format!("No such type constructor {}", name),
+                )),
+            },
+            _ => Err(Self::new_error(con, "Invalid type constructor".to_owned())),
+        }
+    }
+
+    fn apply(&self, con: TypeConstructor, arg: Type) -> Type {
+        match con {
+            TypeConstructor::List => Type::List(Box::new(arg)),
         }
     }
 
@@ -369,6 +427,7 @@ impl Analyzer {
                 // For now treat chars as strings of len = 1
                 // println!("Str: {} {}", value, value.len());
                 assert!(value.len() == 1);
+                // TODO: how to represent strings?
 
                 let value: i32 = value.chars().next().unwrap() as i32;
 
@@ -450,6 +509,9 @@ impl Analyzer {
                     arguments: args,
                     typ,
                 })
+            }
+            ast::ExpressionType::Indexed { .. } => {
+                unimplemented!();
             }
         }
     }

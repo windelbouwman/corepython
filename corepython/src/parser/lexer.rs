@@ -16,10 +16,15 @@ use logos::{Lexer, Logos};
 use std::collections::HashMap;
 use std::str::FromStr;
 
-fn shrink_string(mut txt: String) -> String {
+fn shrink_string(txt: &str) -> String {
+    let mut txt: String = txt.to_owned();
     txt.pop();
     txt.remove(0);
     txt
+}
+
+fn hex_number(txt: &str) -> i32 {
+    i32::from_str_radix(&txt[2..], 16).unwrap()
 }
 
 #[derive(Logos, Debug, Clone)]
@@ -30,13 +35,16 @@ pub enum LogosToken {
     #[regex("[0-9]+", |l| i32::from_str(l.slice()))]
     Number(i32),
 
+    #[regex("0x[0-9a-fA-F]+", |l| hex_number(l.slice()))]
+    HexNumber(i32),
+
     #[regex(r"[0-9]+\.[0-9]+", |l| f64::from_str(l.slice()))]
     Float(f64),
 
     #[regex(r#"""".+""""#, |l| l.slice().to_string())]
     LongString(String),
 
-    #[regex("'[^']+'", |l| shrink_string(l.slice().to_string()))]
+    #[regex("'[^']+'", |l| shrink_string(l.slice()))]
     SmallString(String),
 
     #[regex(r#"#.+\n"#, |l| l.slice().to_string())]
@@ -298,7 +306,9 @@ impl<'t> MyLexer<'t> {
                         self.emit(Token::Identifier { value })
                     }
                 }
-                LogosToken::Number(value) => self.emit(Token::Number { value }),
+                LogosToken::Number(value) | LogosToken::HexNumber(value) => {
+                    self.emit(Token::Number { value })
+                }
                 LogosToken::Float(value) => self.emit(Token::Float { value }),
                 LogosToken::LongString(value) | LogosToken::SmallString(value) => {
                     // pha, ignore for now. Assume docstring

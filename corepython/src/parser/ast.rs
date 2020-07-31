@@ -83,6 +83,10 @@ pub enum ExpressionType {
         callee: Box<Expression>,
         arguments: Vec<Expression>,
     },
+    Indexed {
+        base: Box<Expression>,
+        index: Box<Expression>,
+    },
 }
 
 #[derive(Clone)]

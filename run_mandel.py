@@ -1,21 +1,14 @@
 
 from ppci.wasm import instantiate, read_wasm
-from ppci.ir import i32
+
 import mandel
+import x
 import time
 
 with open('mandel.wasm', 'rb') as f:
     module = read_wasm(f)
 
-def putc(x: i32) -> i32:
-    c = chr(x)
-    if c == 'n':
-        print()
-    else:
-        print(chr(x), end='')
-    return 0
-
-inst = instantiate(module, {'x': {'putc': putc}})
+inst = instantiate(module, {'x': {'putc': x.putc}})
 
 print(inst)
 print('python -> wasm -> native code mandel:')

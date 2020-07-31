@@ -1,6 +1,5 @@
-use super::{parser::ast, wasm, CompilationError};
-// use super::scope::{Scope, Symbol};
 use super::analyze;
+use super::{parser::ast, wasm, CompilationError};
 
 pub fn compile_ast(prog: ast::Program) -> Result<wasm::WasmModule, CompilationError> {
     info!("Compiling AST");
@@ -29,13 +28,13 @@ impl Compiler {
 
     fn compile_prog(mut self, prog: &analyze::Program) -> wasm::WasmModule {
         for import in &prog.imports {
-            let modname = "x";
             warn!(
                 "Assuming imported function {}.{} has signature i32 -> i32",
-                modname, import
+                import.modname, import.name
             );
             let (params, results) = (vec![wasm::Type::I32], vec![wasm::Type::I32]);
-            self.module.add_import(modname, import, params, results);
+            self.module
+                .add_import(&import.modname, &import.name, params, results);
         }
         self.func_offset += prog.imports.len();
 
@@ -55,10 +54,12 @@ impl Compiler {
                     // unimplemented!("Ugh, what now?")
                 }
             },
-            // analyze::Type::Unknown => {
-            //     panic!("Cannot compile partially typed program");
-            //     // wasm::Type::I32
-            // }
+            analyze::Type::List(_) => {
+                unimplemented!("TODO: lists");
+            } // analyze::Type::Unknown => {
+              //     panic!("Cannot compile partially typed program");
+              //     // wasm::Type::I32
+              // }
         }
     }
 
@@ -97,6 +98,9 @@ impl Compiler {
                             self.emit(wasm::Instruction::F64Const(0.0));
                         }
                     }
+                }
+                analyze::Type::List(_) => {
+                    unimplemented!("TODO!");
                 }
             }
         }
@@ -138,15 +142,12 @@ impl Compiler {
             }
             analyze::Statement::While { condition, suite } => {
                 self.emit(wasm::Instruction::Block);
-
-                // pre-check if we must enter loop at all:
+                self.emit(wasm::Instruction::Loop);
                 self.compile_expression(condition);
                 self.emit(wasm::Instruction::I32Eqz); // Invert condition, and branch if not good.
-                self.emit(wasm::Instruction::BrIf(0));
-                self.emit(wasm::Instruction::Loop);
+                self.emit(wasm::Instruction::BrIf(1));
                 self.compile_suite(suite);
-                self.compile_expression(condition);
-                self.emit(wasm::Instruction::BrIf(0));
+                self.emit(wasm::Instruction::Br(0));
                 self.emit(wasm::Instruction::End);
                 self.emit(wasm::Instruction::End);
             }
@@ -199,14 +200,32 @@ impl Compiler {
                     self.compile_expression(argument);
                 }
 
-                let func: usize = match callee.as_ref() {
-                    analyze::Symbol::Function { index, .. } => *index + self.func_offset,
-                    analyze::Symbol::ExternFunction { index } => *index,
+                match callee.as_ref() {
+                    analyze::Symbol::Function { index, .. } => {
+                        let func = *index + self.func_offset;
+                        self.emit(wasm::Instruction::Call(func));
+                    }
+                    analyze::Symbol::ExternFunction { index } => {
+                        let func = *index;
+                        self.emit(wasm::Instruction::Call(func));
+                    }
+                    analyze::Symbol::Builtin(builtin) => {
+                        match builtin {
+                            analyze::Builtin::Ord => {
+                                // Ugh, no need to do anything,
+                                // the character was already converted before ...
+                                // this is weird ..
+                                // unimplemented!();
+                            }
+                            analyze::Builtin::Len => {
+                                unimplemented!();
+                            }
+                        }
+                    }
                     _ => {
                         panic!("Cannot call this!");
                     }
                 };
-                self.emit(wasm::Instruction::Call(func));
             }
         }
     }
@@ -298,7 +317,9 @@ impl Compiler {
                 assert!(typ == &parameter.typ);
                 self.emit(wasm::Instruction::LocalSet(*index));
             }
-            analyze::Symbol::Function { .. } | analyze::Symbol::ExternFunction { .. } => {
+            analyze::Symbol::Function { .. }
+            | analyze::Symbol::ExternFunction { .. }
+            | analyze::Symbol::Builtin(..) => {
                 panic!("Cannot store to this");
             }
         }
@@ -315,7 +336,9 @@ impl Compiler {
             } => {
                 self.emit(wasm::Instruction::LocalGet(*index));
             }
-            analyze::Symbol::Function { .. } | analyze::Symbol::ExternFunction { .. } => {
+            analyze::Symbol::Function { .. }
+            | analyze::Symbol::ExternFunction { .. }
+            | analyze::Symbol::Builtin(..) => {
                 panic!("Cannot load from this");
             }
         }
