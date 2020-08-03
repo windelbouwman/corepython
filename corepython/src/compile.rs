@@ -49,6 +49,9 @@ impl Compiler {
             analyze::Type::BaseType(basetype) => match basetype {
                 analyze::BaseType::Float => wasm::Type::F64,
                 analyze::BaseType::Integer => wasm::Type::I32,
+                analyze::BaseType::Str => {
+                    unimplemented!();
+                }
                 analyze::BaseType::Bool => {
                     wasm::Type::I32
                     // unimplemented!("Ugh, what now?")
@@ -96,6 +99,9 @@ impl Compiler {
                         analyze::BaseType::Float => {
                             // Implicit return 0:
                             self.emit(wasm::Instruction::F64Const(0.0));
+                        }
+                        analyze::BaseType::Str => {
+                            unimplemented!();
                         }
                     }
                 }
@@ -167,6 +173,9 @@ impl Compiler {
             analyze::Expression::Float(value) => {
                 self.emit(wasm::Instruction::F64Const(*value));
             }
+            analyze::Expression::String(_) => {
+                unimplemented!("TODO");
+            }
             analyze::Expression::Identifier(value) => {
                 self.get_local(value);
             }
@@ -209,19 +218,14 @@ impl Compiler {
                         let func = *index;
                         self.emit(wasm::Instruction::Call(func));
                     }
-                    analyze::Symbol::Builtin(builtin) => {
-                        match builtin {
-                            analyze::Builtin::Ord => {
-                                // Ugh, no need to do anything,
-                                // the character was already converted before ...
-                                // this is weird ..
-                                // unimplemented!();
-                            }
-                            analyze::Builtin::Len => {
-                                unimplemented!();
-                            }
+                    analyze::Symbol::Builtin(builtin) => match builtin {
+                        analyze::Builtin::Ord => {
+                            unimplemented!();
                         }
-                    }
+                        analyze::Builtin::Len => {
+                            unimplemented!();
+                        }
+                    },
                     _ => {
                         panic!("Cannot call this!");
                     }

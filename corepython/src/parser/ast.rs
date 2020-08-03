@@ -1,15 +1,18 @@
 use super::Location;
 
+#[derive(Debug)]
 pub struct Program {
     pub top_levels: Vec<TopLevel>,
 }
 
+#[derive(Debug)]
 pub enum TopLevel {
     Import { module: String, name: String },
     FunctionDef(FunctionDef),
     ClassDef(ClassDef),
 }
 
+#[derive(Debug)]
 pub struct FunctionDef {
     pub name: String,
     pub parameters: Vec<Parameter>,
@@ -17,6 +20,7 @@ pub struct FunctionDef {
     pub body: Suite,
 }
 
+#[derive(Debug)]
 pub struct ClassDef {
     pub name: String,
     pub methods: Vec<FunctionDef>,
@@ -24,11 +28,13 @@ pub struct ClassDef {
 
 type Suite = Vec<Statement>;
 
+#[derive(Debug)]
 pub struct Parameter {
     pub name: String,
     pub typ: Expression,
 }
 
+#[derive(Debug)]
 pub enum Statement {
     Return(Expression),
     If {
@@ -60,11 +66,13 @@ pub enum Statement {
     Pass,
 }
 
+#[derive(Debug)]
 pub struct Expression {
     pub location: Location,
     pub kind: ExpressionType,
 }
 
+#[derive(Debug)]
 pub enum ExpressionType {
     Number(i32),
     Float(f64),
@@ -96,13 +104,13 @@ pub enum ExpressionType {
     },
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum BooleanOperator {
     And,
     Or,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum BinaryOperation {
     Add,
     Sub,
@@ -110,7 +118,7 @@ pub enum BinaryOperation {
     Div,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Comparison {
     Lt,
     Gt,

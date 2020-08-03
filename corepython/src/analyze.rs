@@ -3,11 +3,14 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use super::parser::ast;
+use super::parser::{ast, Location};
 use super::CompilationError;
 
 /// Analyze the given AST and construct a type checked and
 /// symbolically resolved program from it.
+///
+/// Analyze also checks for some simple optimizations,
+/// such as ord('A') --> 65
 pub fn analyze(prog: ast::Program) -> Result<Program, CompilationError> {
     let a = Analyzer::new();
     a.analyze_program(&prog)
@@ -115,6 +118,7 @@ pub enum Statement {
 pub enum Expression {
     Number(i32),
     Float(f64),
+    String(String),
     Identifier(Rc<Symbol>),
     BinaryOperation {
         a: Box<Expression>,
@@ -134,6 +138,7 @@ impl Expression {
         match self {
             Expression::Number(_) => &Type::BaseType(BaseType::Integer),
             Expression::Float(_) => &Type::BaseType(BaseType::Float),
+            Expression::String(_) => &Type::BaseType(BaseType::Str),
             Expression::Identifier(symbol) => symbol.get_type(),
             Expression::BinaryOperation { typ, .. } => typ,
             Expression::Call { typ, .. } => typ,
@@ -152,6 +157,7 @@ pub enum BaseType {
     Integer,
     Float,
     Bool,
+    Str,
 }
 
 #[derive(Clone, PartialEq)]
@@ -163,6 +169,20 @@ pub enum Type {
     // Unknown,
     /// A list of certain types
     List(Box<Type>),
+}
+
+impl std::fmt::Display for Type {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Type::BaseType(base_type) => match base_type {
+                BaseType::Float => write!(f, "float"),
+                BaseType::Integer => write!(f, "int"),
+                BaseType::Bool => write!(f, "bool"),
+                BaseType::Str => write!(f, "str"),
+            },
+            Type::List(element) => write!(f, "list[{}]", element),
+        }
+    }
 }
 
 enum TypeConstructor {
@@ -258,9 +278,9 @@ impl Analyzer {
             ast::ExpressionType::Identifier(name) => match name.as_str() {
                 "float" => Ok(Type::BaseType(BaseType::Float)),
                 "int" => Ok(Type::BaseType(BaseType::Integer)),
-                name => Err(Self::new_error(
+                name => Err(new_error(
                     typ,
-                    format!("Invalid type identifier: {}", name),
+                    &format!("Invalid type identifier: {}", name),
                 )),
             },
             ast::ExpressionType::Indexed { base, index } => {
@@ -269,7 +289,7 @@ impl Analyzer {
                 let typ = self.apply(base, index);
                 Ok(typ)
             }
-            _ => Err(Self::new_error(typ, "Invalid type expression".to_owned())),
+            _ => Err(new_error(typ, "Invalid type expression")),
         }
     }
 
@@ -280,12 +300,12 @@ impl Analyzer {
         match &con.kind {
             ast::ExpressionType::Identifier(name) => match name.as_str() {
                 "list" => Ok(TypeConstructor::List),
-                name => Err(Self::new_error(
+                name => Err(new_error(
                     con,
-                    format!("No such type constructor {}", name),
+                    &format!("No such type constructor {}", name),
                 )),
             },
-            _ => Err(Self::new_error(con, "Invalid type constructor".to_owned())),
+            _ => Err(new_error(con, "Invalid type constructor")),
         }
     }
 
@@ -430,14 +450,9 @@ impl Analyzer {
             ast::ExpressionType::Str(value) => {
                 // unimplemented!("STR: {}", value);
 
-                // For now treat chars as strings of len = 1
                 // println!("Str: {} {}", value, value.len());
-                assert!(value.len() == 1);
                 // TODO: how to represent strings?
-
-                let value: i32 = value.chars().next().unwrap() as i32;
-
-                Ok(Expression::Number(value))
+                Ok(Expression::String(value.clone()))
             }
             ast::ExpressionType::Identifier(value) => {
                 let symbol = self.get_local(value);
@@ -447,7 +462,7 @@ impl Analyzer {
                 let a = self.analyze_expression(a)?;
                 let b = self.analyze_expression(b)?;
                 if a.get_type() != b.get_type() {
-                    return Err(Self::new_error(expression, "Type mismatch".to_owned()));
+                    return Err(new_error(expression, "Type mismatch"));
                 }
                 let typ = Type::BaseType(BaseType::Bool);
                 Ok(Expression::BinaryOperation {
@@ -462,7 +477,7 @@ impl Analyzer {
                 let b = self.analyze_expression(b)?;
 
                 if a.get_type() != b.get_type() {
-                    return Err(Self::new_error(expression, "Type mismatch".to_owned()));
+                    return Err(new_error(expression, "Type mismatch"));
                 }
 
                 let typ = a.get_type().clone();
@@ -492,29 +507,61 @@ impl Analyzer {
                     args.push(arg);
                 }
 
-                let callee = match &callee.kind {
+                match &callee.kind {
                     ast::ExpressionType::Identifier(name) => {
                         // arg
                         // return Err(Self::new_error(callee, "TODO".to_owned()));
                         if let Some(callee) = self.lookup(name) {
-                            callee
+                            // callee
+
+                            match callee.as_ref() {
+                                Symbol::Function { function, index: _ } => {
+                                    // Check args now!!!
+                                    let expected_types =
+                                        function.parameters.iter().map(|p| p.typ.clone()).collect();
+                                    self.check_arguments(
+                                        &expression.location,
+                                        &args,
+                                        expected_types,
+                                    )?;
+
+                                    // Arg: TODO: determine type!
+                                    let typ = Type::BaseType(BaseType::Integer);
+
+                                    Ok(Expression::Call {
+                                        callee,
+                                        arguments: args,
+                                        typ,
+                                    })
+                                }
+                                Symbol::ExternFunction { index: _ } => {
+                                    // TODO: Check args now!!!
+
+                                    // Arg: TODO: determine type!
+                                    let typ = Type::BaseType(BaseType::Integer);
+
+                                    Ok(Expression::Call {
+                                        callee,
+                                        arguments: args,
+                                        typ,
+                                    })
+                                }
+                                Symbol::Builtin(builtin) => {
+                                    self.analyze_builtin_call(&expression.location, builtin, args)
+                                }
+                                Symbol::Local { .. } => {
+                                    Err(new_error(expression, "Cannot call local variable"))
+                                }
+                                Symbol::Parameter { .. } => {
+                                    Err(new_error(expression, "Cannot call parameter"))
+                                }
+                            }
                         } else {
-                            return Err(Self::new_error(callee, format!("Undefined: {}", name)));
+                            Err(new_error(callee, &format!("Undefined: {}", name)))
                         }
                     }
-                    _ => {
-                        return Err(Self::new_error(callee, "Cannot call".to_owned()));
-                    }
-                };
-
-                // Arg: TODO: determine type!
-                let typ = Type::BaseType(BaseType::Integer);
-
-                Ok(Expression::Call {
-                    callee,
-                    arguments: args,
-                    typ,
-                })
+                    _ => Err(new_error(callee, "Cannot call")),
+                }
             }
             ast::ExpressionType::Indexed { .. } => {
                 unimplemented!();
@@ -522,11 +569,71 @@ impl Analyzer {
         }
     }
 
-    fn new_error(expression: &ast::Expression, message: String) -> CompilationError {
-        CompilationError {
-            location: Some(expression.location.clone()),
-            message,
+    fn analyze_builtin_call(
+        &self,
+        location: &Location,
+        builtin: &Builtin,
+        args: Vec<Expression>,
+    ) -> Result<Expression, CompilationError> {
+        match builtin {
+            Builtin::Len => {
+                unimplemented!();
+            }
+            Builtin::Ord => {
+                self.check_arguments(location, &args, vec![Type::BaseType(BaseType::Str)])?;
+                let arg = &args[0];
+
+                match arg {
+                    Expression::String(value) => {
+                        // For now treat chars as strings of len = 1
+                        if value.len() == 1 {
+                            let value: i32 = value.chars().next().unwrap() as i32;
+
+                            Ok(Expression::Number(value))
+                        } else {
+                            Err(CompilationError::new(
+                                location,
+                                "String passed to ord must be a single character",
+                            ))
+                        }
+                    }
+                    _ => {
+                        unimplemented!();
+                    }
+                }
+            }
         }
+    }
+
+    fn check_arguments(
+        &self,
+        location: &Location,
+        actual_args: &Vec<Expression>,
+        expected_types: Vec<Type>,
+    ) -> Result<(), CompilationError> {
+        if actual_args.len() != expected_types.len() {
+            return Err(CompilationError::new(
+                location,
+                &format!(
+                    "Expected {} arguments, but got {}",
+                    expected_types.len(),
+                    actual_args.len()
+                ),
+            ));
+        }
+
+        for (arg, typ) in actual_args.iter().zip(expected_types.iter()) {
+            let arg_typ = arg.get_type();
+            if arg_typ != typ {
+                return Err(CompilationError::new(
+                    location,
+                    &format!("Expected {} but got {}", typ, arg_typ),
+                ));
+            }
+        }
+
+        // return Err(new_error(act, message: String))
+        Ok(())
     }
 
     fn new_local(&mut self, name: &str, typ: Type) {
@@ -588,4 +695,8 @@ impl Analyzer {
     fn leave_scope(&mut self) -> Scope {
         self.scopes.pop().unwrap()
     }
+}
+
+fn new_error(expression: &ast::Expression, message: &str) -> CompilationError {
+    CompilationError::new(&expression.location, message)
 }

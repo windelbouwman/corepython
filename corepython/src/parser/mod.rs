@@ -30,25 +30,47 @@ pub fn parse_python(source: &str) -> Result<ast::Program, CompilationError> {
     corepython::ProgramParser::new()
         .parse(lexer)
         .map_err(|err| match err {
-            lalrpop_util::ParseError::UnrecognizedEOF { location, expected } => CompilationError {
-                location: Some(location),
-                message: format!("Unexpected end of file, expected: {}", expected.join(", ")),
-            },
-            lalrpop_util::ParseError::UnrecognizedToken { token, expected } => CompilationError {
-                location: Some(token.0),
-                message: format!("Got {:?}, expected {} ", token.1, expected.join(", ")),
-            },
-            lalrpop_util::ParseError::InvalidToken { location } => CompilationError {
-                location: Some(location),
-                message: "Invalid token.".to_string(),
-            },
-            lalrpop_util::ParseError::ExtraToken { token } => CompilationError {
-                location: Some(token.0),
-                message: format!("Got an extra token {:?}", token.1),
-            },
-            lalrpop_util::ParseError::User { error } => CompilationError {
-                location: Some(error.location),
-                message: error.msg,
-            },
+            lalrpop_util::ParseError::UnrecognizedEOF { location, expected } => {
+                CompilationError::new(
+                    &location,
+                    &format!("Unexpected end of file, expected: {}", expected.join(", ")),
+                )
+            }
+            lalrpop_util::ParseError::UnrecognizedToken { token, expected } => {
+                CompilationError::new(
+                    &token.0,
+                    &format!("Got {:?}, expected {} ", token.1, expected.join(", ")),
+                )
+            }
+            lalrpop_util::ParseError::InvalidToken { location } => {
+                CompilationError::new(&location, "Invalid token.")
+            }
+            lalrpop_util::ParseError::ExtraToken { token } => {
+                CompilationError::new(&token.0, &format!("Got an extra token {:?}", token.1))
+            }
+            lalrpop_util::ParseError::User { error } => {
+                CompilationError::new(&error.location, &error.msg)
+            }
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_python;
+
+    #[test]
+    fn test_parse_empty() {
+        parse_python("").expect("Ok");
+    }
+
+    #[test]
+    fn test_bad_indentation() {
+        let source = r###"
+def foo():
+   pass
+    return 2
+        "###;
+        let error = parse_python(source).expect_err("Indentation");
+        assert_eq!(error.location.unwrap().row, 4);
+    }
 }

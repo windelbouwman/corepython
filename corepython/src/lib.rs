@@ -31,3 +31,14 @@ where
     })?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::python_to_wasm;
+
+    #[test]
+    fn test_parse_empty() {
+        let mut buf = vec![];
+        python_to_wasm("", &mut buf).expect("Ok");
+    }
+}

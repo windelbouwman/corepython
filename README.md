@@ -9,6 +9,8 @@ Features:
 - Very minimal subset of the Python language. Only the core of it, nothing fancy.
 - CorePython compiler itself is embeddable in browser (small WebAssembly download).
 
+![Build Status](https://github.com/windelbouwman/corepython/workflows/CI/badge.svg)
+
 # Phase
 
 This project is in prototype phase.
