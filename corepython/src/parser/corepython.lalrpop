@@ -180,6 +180,12 @@ Atom: ast::Expression = {
             kind: ast::ExpressionType::Str(n)
         }
     },
+    <location:@L> "[" <elements:Comma<Expression>> "]" => {
+        ast::Expression {
+            location,
+            kind: ast::ExpressionType::List { elements },
+        }
+    },
     // <n:Bool> => ast::Expression::Bool(n),
     <location:@L> <n:Identifier> => {
         ast::Expression {

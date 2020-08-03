@@ -79,6 +79,9 @@ pub enum ExpressionType {
     Str(String),
     // Bool(bool),
     Identifier(String),
+    List {
+        elements: Vec<Expression>,
+    },
     Comparison {
         a: Box<Expression>,
         op: Comparison,

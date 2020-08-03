@@ -58,7 +58,9 @@ impl Compiler {
                 }
             },
             analyze::Type::List(_) => {
-                unimplemented!("TODO: lists");
+                // Assume pointer to some data structure in wasm memory.
+                wasm::Type::I32
+                // unimplemented!("TODO: lists");
             } // analyze::Type::Unknown => {
               //     panic!("Cannot compile partially typed program");
               //     // wasm::Type::I32
@@ -157,6 +159,18 @@ impl Compiler {
                 self.emit(wasm::Instruction::End);
                 self.emit(wasm::Instruction::End);
             }
+            analyze::Statement::For {
+                target: _,
+                iter: _,
+                suite,
+            } => {
+                self.emit(wasm::Instruction::Loop);
+                error!("TODO: For loop is wildly not implemented!");
+                // unimplemented!();
+                self.compile_suite(suite);
+                // self.emit(wasm::Instruction::Br(0));
+                self.emit(wasm::Instruction::End);
+            }
             analyze::Statement::Assignment { target, value } => {
                 self.compile_expression(value);
                 let typ = value.get_type();
@@ -175,6 +189,30 @@ impl Compiler {
             }
             analyze::Expression::String(_) => {
                 unimplemented!("TODO");
+            }
+            analyze::Expression::List { elements, typ: _ } => {
+                // Hmm, okay, list. Now what.
+                // Plan:
+                // Layout list literal in memory. Grab some memory, store all
+                // elements sequentially.
+
+                // TODO: arbitrary size of list:
+                assert!(!elements.is_empty());
+
+                // TODO: determine size of element:
+                let element_size = 16;
+                let mem_size = element_size * elements.len();
+
+                // Grab memory:
+                self.allocate(mem_size);
+
+                // Store:
+                let mut offset = 0;
+                for element in elements {
+                    self.compile_expression(element);
+                    self.write_mem(offset);
+                    offset += element_size;
+                }
             }
             analyze::Expression::Identifier(value) => {
                 self.get_local(value);
@@ -348,8 +386,21 @@ impl Compiler {
         }
     }
 
+    /// Emit code to allocate some memory, and leave pointer on stack.
+    fn allocate(&mut self, amount: usize) {
+        // Put address on stack:
+        debug!("Allocating {} bytes", amount);
+        self.emit(wasm::Instruction::I32Const(0));
+    }
+
+    /// Write top of stack (TOS) to memory at TOS[-1] + offset
+    fn write_mem(&mut self, _offset: usize) {
+        // TODO: Store (drop for now?)
+        self.emit(wasm::Instruction::Drp);
+    }
+
     fn emit(&mut self, opcode: wasm::Instruction) {
-        // info!("Emit: {:?}", opcode);
+        info!("Emit: {:?}", opcode);
         self.code.push(opcode);
     }
 }

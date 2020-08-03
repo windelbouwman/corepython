@@ -29,7 +29,7 @@ fn hex_number(txt: &str) -> i32 {
 
 #[derive(Logos, Debug, Clone)]
 pub enum LogosToken {
-    #[regex("[a-zA-Z]+", |l| l.slice().to_string())]
+    #[regex("[a-zA-Z][a-zA-Z0-9_]*", |l| l.slice().to_string())]
     Identifier(String),
 
     #[regex("[0-9]+", |l| i32::from_str(l.slice()))]

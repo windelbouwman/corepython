@@ -110,6 +110,11 @@ pub enum Statement {
         condition: Expression,
         suite: Suite,
     },
+    For {
+        target: Rc<Symbol>,
+        iter: Expression,
+        suite: Suite,
+    },
     Return {
         value: Expression,
     },
@@ -119,6 +124,10 @@ pub enum Expression {
     Number(i32),
     Float(f64),
     String(String),
+    List {
+        elements: Vec<Expression>,
+        typ: Type,
+    },
     Identifier(Rc<Symbol>),
     BinaryOperation {
         a: Box<Expression>,
@@ -139,6 +148,7 @@ impl Expression {
             Expression::Number(_) => &Type::BaseType(BaseType::Integer),
             Expression::Float(_) => &Type::BaseType(BaseType::Float),
             Expression::String(_) => &Type::BaseType(BaseType::Str),
+            Expression::List { elements: _, typ } => typ,
             Expression::Identifier(symbol) => symbol.get_type(),
             Expression::BinaryOperation { typ, .. } => typ,
             Expression::Call { typ, .. } => typ,
@@ -393,12 +403,29 @@ impl Analyzer {
                 Ok(Statement::While { condition, suite })
             }
             ast::Statement::For {
-                target: _,
-                iter: _,
-                suite: _,
+                target,
+                iter,
+                suite,
             } => {
-                // self.compile_suite(suite)?;
-                unimplemented!();
+                let location = &iter.location;
+                let iter = self.analyze_expression(iter)?;
+                let typ = iter.get_type();
+                let element_typ = match typ {
+                    Type::List(element_typ) => element_typ,
+                    Type::BaseType(..) => {
+                        return Err(CompilationError::new(
+                            location,
+                            "Cannot iterate over this type.",
+                        ));
+                    }
+                };
+                let target = self.store_value(target, element_typ);
+                let suite = self.analyze_suite(suite)?;
+                Ok(Statement::For {
+                    target,
+                    iter,
+                    suite,
+                })
             }
             ast::Statement::Pass => {
                 unimplemented!();
@@ -437,6 +464,18 @@ impl Analyzer {
     //     unimplemented!();
     // }
 
+    fn analyze_expressions(
+        &mut self,
+        expressions: &[ast::Expression],
+    ) -> Result<Vec<Expression>, CompilationError> {
+        let mut new_expressions = vec![];
+        for expression in expressions {
+            let new_expr = self.analyze_expression(expression)?;
+            new_expressions.push(new_expr);
+        }
+        Ok(new_expressions)
+    }
+
     fn analyze_expression(
         &mut self,
         expression: &ast::Expression,
@@ -454,6 +493,33 @@ impl Analyzer {
                 // TODO: how to represent strings?
                 Ok(Expression::String(value.clone()))
             }
+            ast::ExpressionType::List { elements } => {
+                let elements = self.analyze_expressions(elements)?;
+
+                // Well. A list.
+                // Constraints:
+                // - At least one element
+                // - All elements have equal type
+                if elements.is_empty() {
+                    return Err(new_error(expression, "List must contain at least 1 value"));
+                }
+
+                let (first, rest) = elements.split_first().expect("At least 1 element");
+
+                let element_typ = first.get_type();
+                for item in rest {
+                    if element_typ != item.get_type() {
+                        return Err(new_error(
+                            expression,
+                            "All elements must be of the same type",
+                        ));
+                    }
+                }
+
+                let typ = Type::List(Box::new(element_typ.clone()));
+
+                Ok(Expression::List { elements, typ })
+            }
             ast::ExpressionType::Identifier(value) => {
                 let symbol = self.get_local(value);
                 Ok(Expression::Identifier(symbol))
@@ -461,9 +527,8 @@ impl Analyzer {
             ast::ExpressionType::Comparison { a, op, b } => {
                 let a = self.analyze_expression(a)?;
                 let b = self.analyze_expression(b)?;
-                if a.get_type() != b.get_type() {
-                    return Err(new_error(expression, "Type mismatch"));
-                }
+                self.equal_types(a.get_type(), b.get_type(), &expression.location)?;
+
                 let typ = Type::BaseType(BaseType::Bool);
                 Ok(Expression::BinaryOperation {
                     a: Box::new(a),
@@ -475,10 +540,7 @@ impl Analyzer {
             ast::ExpressionType::BinaryOperation { a, op, b } => {
                 let a = self.analyze_expression(a)?;
                 let b = self.analyze_expression(b)?;
-
-                if a.get_type() != b.get_type() {
-                    return Err(new_error(expression, "Type mismatch"));
-                }
+                self.equal_types(a.get_type(), b.get_type(), &expression.location)?;
 
                 let typ = a.get_type().clone();
                 // TODO: type checking!
@@ -501,11 +563,7 @@ impl Analyzer {
                 })
             }
             ast::ExpressionType::Call { callee, arguments } => {
-                let mut args = vec![];
-                for argument in arguments {
-                    let arg = self.analyze_expression(argument)?;
-                    args.push(arg);
-                }
+                let args = self.analyze_expressions(arguments)?;
 
                 match &callee.kind {
                     ast::ExpressionType::Identifier(name) => {
@@ -633,6 +691,21 @@ impl Analyzer {
         }
 
         // return Err(new_error(act, message: String))
+        Ok(())
+    }
+
+    fn equal_types(
+        &self,
+        a_typ: &Type,
+        b_typ: &Type,
+        location: &Location,
+    ) -> Result<(), CompilationError> {
+        if a_typ != b_typ {
+            return Err(CompilationError::new(
+                location,
+                &format!("Type mismatch: '{}' is not '{}'", a_typ, b_typ),
+            ));
+        }
         Ok(())
     }
 
