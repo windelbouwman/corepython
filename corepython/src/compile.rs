@@ -28,11 +28,16 @@ impl Compiler {
 
     fn compile_prog(mut self, prog: &analyze::Program) -> wasm::WasmModule {
         for import in &prog.imports {
-            warn!(
-                "Assuming imported function {}.{} has signature i32 -> i32",
-                import.modname, import.name
-            );
-            let (params, results) = (vec![wasm::Type::I32], vec![wasm::Type::I32]);
+            let params: Vec<wasm::Type> = import
+                .parameter_types
+                .iter()
+                .map(|t| self.get_type(t))
+                .collect();
+            let results: Vec<wasm::Type> = if let Some(t) = &import.return_type {
+                vec![self.get_type(t)]
+            } else {
+                vec![]
+            };
             self.module
                 .add_import(&import.modname, &import.name, params, results);
         }
@@ -160,15 +165,71 @@ impl Compiler {
                 self.emit(wasm::Instruction::End);
             }
             analyze::Statement::For {
-                target: _,
-                iter: _,
+                loop_var, // counts from 0 to len
+                iter_var, // points to iterable (list)
+                target,
+                iter,
                 suite,
             } => {
+                let int_type = analyze::Type::BaseType(analyze::BaseType::Integer);
+
+                info!("Loop var {:?}", loop_var);
+                info!("Iter var {:?}", iter_var);
+
+                // Evaluate iterator:
+                self.compile_expression(iter);
+
+                // Store iterator var:
+                self.store_value(iter_var, &int_type);
+
+                // Init loop var:
+                self.emit(wasm::Instruction::I32Const(0));
+                self.store_value(loop_var, &int_type);
+
                 self.emit(wasm::Instruction::Loop);
-                error!("TODO: For loop is wildly not implemented!");
-                // unimplemented!();
+
+                // Load current element from iter var:
+                match iter.get_type() {
+                    analyze::Type::List(element_type) => {
+                        let element_size = self.get_sizeof(element_type);
+                        let element_wasm_typ = self.get_type(element_type);
+                        let header_size = 4; // i32 for length of list
+                        let data_start = round_to_multiple_of(header_size, element_size);
+
+                        self.get_local(iter_var);
+                        self.get_local(loop_var);
+                        self.emit(wasm::Instruction::I32Const(element_size as i32)); // sizeof int32 .....
+                        self.emit(wasm::Instruction::I32Mul);
+                        self.emit(wasm::Instruction::I32Add);
+                        self.read_mem(data_start, &element_wasm_typ);
+                        self.store_value(target, &element_type);
+                    }
+                    _ => {
+                        unimplemented!();
+                    }
+                }
+
+                // Execute body:
                 self.compile_suite(suite);
-                // self.emit(wasm::Instruction::Br(0));
+
+                // i++ (update loop variable)
+                // self.emit(wasm::Instruction::LocalGet(loop_var_index));
+                self.get_local(loop_var);
+                self.emit(wasm::Instruction::I32Const(1));
+                self.emit(wasm::Instruction::I32Add);
+
+                // self.emit(wasm::Instruction::LocalTee(loop_var));
+                self.store_value(loop_var, &int_type);
+                self.get_local(loop_var);
+
+                // Get length
+                self.get_local(iter_var);
+                self.emit(wasm::Instruction::I32Load(2, 0));
+
+                // Are we done?
+                self.emit(wasm::Instruction::I32LtS);
+                self.emit(wasm::Instruction::BrIf(0));
+
                 self.emit(wasm::Instruction::End);
             }
             analyze::Statement::Assignment { target, value } => {
@@ -176,6 +237,19 @@ impl Compiler {
                 let typ = value.get_type();
                 self.store_value(target, typ);
             }
+        }
+    }
+
+    fn get_sizeof(&self, element_type: &analyze::Type) -> usize {
+        match element_type {
+            analyze::Type::BaseType(base_type) => match base_type {
+                analyze::BaseType::Integer => 4,
+                analyze::BaseType::Float => 8,
+                _ => {
+                    unimplemented!();
+                }
+            },
+            analyze::Type::List(_) => 4,
         }
     }
 
@@ -190,29 +264,51 @@ impl Compiler {
             analyze::Expression::String(_) => {
                 unimplemented!("TODO");
             }
-            analyze::Expression::List { elements, typ: _ } => {
+            analyze::Expression::List {
+                elements,
+                typ: _,
+                helper_local,
+            } => {
                 // Hmm, okay, list. Now what.
                 // Plan:
                 // Layout list literal in memory. Grab some memory, store all
                 // elements sequentially.
+                // Another idea: evaluate all elements and finally push the length
+                // on the stack. Popping the elements will be in reversed order..
+                let int_type = analyze::Type::BaseType(analyze::BaseType::Integer);
 
                 // TODO: arbitrary size of list:
                 assert!(!elements.is_empty());
 
+                let element_typ = elements.first().expect("At least 1 element").get_type();
+                let element_size = self.get_sizeof(element_typ);
+                let element_wasm_type = self.get_type(element_typ);
+
+                let header_size = 4; // i32 for length of list
+                let data_start = round_to_multiple_of(header_size, element_size);
+
                 // TODO: determine size of element:
-                let element_size = 16;
-                let mem_size = element_size * elements.len();
+                let mem_size = element_size * elements.len() + data_start;
 
                 // Grab memory:
                 self.allocate(mem_size);
+                self.store_value(helper_local, &int_type);
+
+                // Write len in header:
+                self.get_local(helper_local);
+                self.emit(wasm::Instruction::I32Const(elements.len() as i32));
+                self.write_mem(0, &wasm::Type::I32);
 
                 // Store:
-                let mut offset = 0;
+                let mut offset = data_start;
                 for element in elements {
+                    self.get_local(helper_local);
                     self.compile_expression(element);
-                    self.write_mem(offset);
+                    self.write_mem(offset, &element_wasm_type);
                     offset += element_size;
                 }
+
+                self.get_local(helper_local);
             }
             analyze::Expression::Identifier(value) => {
                 self.get_local(value);
@@ -252,7 +348,7 @@ impl Compiler {
                         let func = *index + self.func_offset;
                         self.emit(wasm::Instruction::Call(func));
                     }
-                    analyze::Symbol::ExternFunction { index } => {
+                    analyze::Symbol::ExternFunction { index, .. } => {
                         let func = *index;
                         self.emit(wasm::Instruction::Call(func));
                     }
@@ -351,8 +447,8 @@ impl Compiler {
 
     fn store_value(&mut self, symbol: &analyze::Symbol, typ: &analyze::Type) {
         match symbol {
-            analyze::Symbol::Local { local, index } => {
-                assert!(typ == &local.typ);
+            analyze::Symbol::Local { local: _, index } => {
+                // assert!(typ == &local.typ);
                 self.emit(wasm::Instruction::LocalSet(*index));
             }
             analyze::Symbol::Parameter { parameter, index } => {
@@ -388,19 +484,79 @@ impl Compiler {
 
     /// Emit code to allocate some memory, and leave pointer on stack.
     fn allocate(&mut self, amount: usize) {
-        // Put address on stack:
         debug!("Allocating {} bytes", amount);
+        let amount = round_to_multiple_of(amount, 8);
+
+        // First simple inline implementation of malloc which only increments memory:
+
+        // Current value on stack:
         self.emit(wasm::Instruction::I32Const(0));
+        self.emit(wasm::Instruction::I32Load(2, 0));
+
+        // Increment free memory base:
+        self.emit(wasm::Instruction::I32Const(0));
+        self.emit(wasm::Instruction::I32Const(0));
+        self.emit(wasm::Instruction::I32Load(2, 0));
+        self.emit(wasm::Instruction::I32Const(amount as i32));
+        self.emit(wasm::Instruction::I32Add);
+        self.emit(wasm::Instruction::I32Store(2, 0));
+
+        // Add header size (aligned to 8 bytes):
+        let header_size = 4;
+        self.emit(wasm::Instruction::I32Const(
+            round_to_multiple_of(header_size, 8) as i32,
+        ));
+        self.emit(wasm::Instruction::I32Add);
     }
 
     /// Write top of stack (TOS) to memory at TOS[-1] + offset
-    fn write_mem(&mut self, _offset: usize) {
-        // TODO: Store (drop for now?)
-        self.emit(wasm::Instruction::Drp);
+    fn write_mem(&mut self, offset: usize, typ: &wasm::Type) {
+        match typ {
+            wasm::Type::F64 => {
+                self.emit(wasm::Instruction::F64Store(3, offset));
+            }
+            wasm::Type::I32 => {
+                self.emit(wasm::Instruction::I32Store(2, offset));
+            }
+        }
+    }
+
+    fn read_mem(&mut self, offset: usize, typ: &wasm::Type) {
+        match typ {
+            wasm::Type::F64 => {
+                self.emit(wasm::Instruction::F64Load(3, offset));
+            }
+            wasm::Type::I32 => {
+                self.emit(wasm::Instruction::I32Load(2, offset));
+            }
+        }
     }
 
     fn emit(&mut self, opcode: wasm::Instruction) {
-        info!("Emit: {:?}", opcode);
+        // info!("Emit: {:?}", opcode);
         self.code.push(opcode);
+    }
+}
+
+fn round_to_multiple_of(value: usize, alignment: usize) -> usize {
+    let remaining = value % alignment;
+    if remaining > 0 {
+        value + alignment - remaining
+    } else {
+        value
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use super::round_to_multiple_of;
+
+    #[test]
+    fn test_round_to_multiple_of() {
+        assert_eq!(16, round_to_multiple_of(9, 8));
+        assert_eq!(8, round_to_multiple_of(8, 4));
+        assert_eq!(21, round_to_multiple_of(20, 7));
+        assert_eq!(0, round_to_multiple_of(0, 3));
     }
 }

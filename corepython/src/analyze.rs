@@ -16,6 +16,7 @@ pub fn analyze(prog: ast::Program) -> Result<Program, CompilationError> {
     a.analyze_program(&prog)
 }
 
+#[derive(Debug)]
 pub enum Symbol {
     Parameter {
         parameter: Rc<Parameter>,
@@ -32,6 +33,7 @@ pub enum Symbol {
     },
     ExternFunction {
         index: usize,
+        import: Rc<Import>,
     },
     Builtin(Builtin),
     // TODO:
@@ -41,6 +43,7 @@ pub enum Symbol {
     // Unresolved,
 }
 
+#[derive(Debug)]
 pub enum Builtin {
     Ord,
     Len,
@@ -65,26 +68,32 @@ impl Symbol {
     }
 }
 
+#[derive(Debug)]
 pub struct Parameter {
     pub name: String,
     pub typ: Type,
 }
 
+#[derive(Debug)]
 pub struct Local {
-    pub name: String,
+    // pub name: String,
     pub typ: Type,
 }
 
 pub struct Program {
     pub functions: Vec<Rc<Function>>,
-    pub imports: Vec<Import>,
+    pub imports: Vec<Rc<Import>>,
 }
 
+#[derive(Debug)]
 pub struct Import {
     pub modname: String,
     pub name: String,
+    pub parameter_types: Vec<Type>,
+    pub return_type: Option<Type>,
 }
 
+#[derive(Debug)]
 pub struct Function {
     pub name: String,
     pub parameters: Vec<Rc<Parameter>>,
@@ -95,6 +104,7 @@ pub struct Function {
 
 type Suite = Vec<Statement>;
 
+#[derive(Debug)]
 pub enum Statement {
     Assignment {
         target: Rc<Symbol>,
@@ -111,6 +121,8 @@ pub enum Statement {
         suite: Suite,
     },
     For {
+        loop_var: Rc<Symbol>,
+        iter_var: Rc<Symbol>,
         target: Rc<Symbol>,
         iter: Expression,
         suite: Suite,
@@ -120,6 +132,7 @@ pub enum Statement {
     },
 }
 
+#[derive(Debug)]
 pub enum Expression {
     Number(i32),
     Float(f64),
@@ -127,6 +140,7 @@ pub enum Expression {
     List {
         elements: Vec<Expression>,
         typ: Type,
+        helper_local: Rc<Symbol>,
     },
     Identifier(Rc<Symbol>),
     BinaryOperation {
@@ -148,7 +162,7 @@ impl Expression {
             Expression::Number(_) => &Type::BaseType(BaseType::Integer),
             Expression::Float(_) => &Type::BaseType(BaseType::Float),
             Expression::String(_) => &Type::BaseType(BaseType::Str),
-            Expression::List { elements: _, typ } => typ,
+            Expression::List { typ, .. } => typ,
             Expression::Identifier(symbol) => symbol.get_type(),
             Expression::BinaryOperation { typ, .. } => typ,
             Expression::Call { typ, .. } => typ,
@@ -156,13 +170,14 @@ impl Expression {
     }
 }
 
+#[derive(Debug)]
 pub enum BinaryOperation {
     ArithmaticOperation(ast::BinaryOperation),
     Comparison(ast::Comparison),
     Boolean(ast::BooleanOperator),
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum BaseType {
     Integer,
     Float,
@@ -170,7 +185,7 @@ pub enum BaseType {
     Str,
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Type {
     BaseType(BaseType),
     // TODO: user type / function type
@@ -229,11 +244,15 @@ impl Scope {
 
 struct Analyzer {
     scopes: Vec<Scope>,
+    local_counter: usize,
 }
 
 impl Analyzer {
     fn new() -> Self {
-        Analyzer { scopes: vec![] }
+        Analyzer {
+            scopes: vec![],
+            local_counter: 0,
+        }
     }
 
     fn analyze_program(mut self, prog: &ast::Program) -> Result<Program, CompilationError> {
@@ -252,15 +271,31 @@ impl Analyzer {
                     self.define(&function_def.name, Rc::new(symbol));
                 }
                 ast::TopLevel::Import { module, name } => {
-                    // arg
-                    // TODO!
                     info!("Importing {}.{}", module, name);
+
+                    // TODO: how to determine parameter types?
+                    // we could use type stubs???
+                    let parameter_types = if name.contains("float") {
+                        vec![Type::BaseType(BaseType::Float)]
+                    } else {
+                        vec![Type::BaseType(BaseType::Integer)]
+                    };
+                    let return_type = Some(Type::BaseType(BaseType::Integer));
+
+                    warn!(
+                        "Assuming imported function {}.{} has signature {:?} -> {:?}",
+                        module, name, parameter_types, return_type
+                    );
+
                     let index = imports.len();
-                    imports.push(Import {
+                    let import = Rc::new(Import {
                         modname: module.clone(),
                         name: name.clone(),
+                        parameter_types,
+                        return_type,
                     });
-                    let symbol = Symbol::ExternFunction { index };
+                    imports.push(import.clone());
+                    let symbol = Symbol::ExternFunction { index, import };
                     self.define(name, Rc::new(symbol));
                 }
                 ast::TopLevel::ClassDef { .. } => {
@@ -331,8 +366,11 @@ impl Analyzer {
     ) -> Result<Function, CompilationError> {
         debug!("Analyzing function {}", function_def.name);
         self.enter_scope();
+        self.local_counter = 0;
         let mut parameters = vec![];
-        for (index, parameter) in function_def.parameters.iter().enumerate() {
+        for parameter in &function_def.parameters {
+            let index = self.local_counter;
+            self.local_counter += 1;
             let param_type = self.get_type(&parameter.typ)?;
             let param = Rc::new(Parameter {
                 name: parameter.name.clone(),
@@ -407,6 +445,8 @@ impl Analyzer {
                 iter,
                 suite,
             } => {
+                let loop_var = self.new_local(None, Type::BaseType(BaseType::Integer));
+                let iter_var = self.new_local(None, Type::BaseType(BaseType::Integer));
                 let location = &iter.location;
                 let iter = self.analyze_expression(iter)?;
                 let typ = iter.get_type();
@@ -422,6 +462,8 @@ impl Analyzer {
                 let target = self.store_value(target, element_typ);
                 let suite = self.analyze_suite(suite)?;
                 Ok(Statement::For {
+                    loop_var,
+                    iter_var,
                     target,
                     iter,
                     suite,
@@ -518,7 +560,13 @@ impl Analyzer {
 
                 let typ = Type::List(Box::new(element_typ.clone()));
 
-                Ok(Expression::List { elements, typ })
+                let helper_local = self.new_local(None, Type::BaseType(BaseType::Integer));
+
+                Ok(Expression::List {
+                    elements,
+                    typ,
+                    helper_local,
+                })
             }
             ast::ExpressionType::Identifier(value) => {
                 let symbol = self.get_local(value);
@@ -575,12 +623,12 @@ impl Analyzer {
                             match callee.as_ref() {
                                 Symbol::Function { function, index: _ } => {
                                     // Check args now!!!
-                                    let expected_types =
+                                    let expected_types: Vec<Type> =
                                         function.parameters.iter().map(|p| p.typ.clone()).collect();
                                     self.check_arguments(
                                         &expression.location,
                                         &args,
-                                        expected_types,
+                                        &expected_types,
                                     )?;
 
                                     // Arg: TODO: determine type!
@@ -592,11 +640,16 @@ impl Analyzer {
                                         typ,
                                     })
                                 }
-                                Symbol::ExternFunction { index: _ } => {
-                                    // TODO: Check args now!!!
+                                Symbol::ExternFunction { index: _, import } => {
+                                    // Check argument types:
+                                    self.check_arguments(
+                                        &expression.location,
+                                        &args,
+                                        &import.parameter_types,
+                                    )?;
 
-                                    // Arg: TODO: determine type!
-                                    let typ = Type::BaseType(BaseType::Integer);
+                                    // determine return type!
+                                    let typ = import.return_type.as_ref().unwrap().clone();
 
                                     Ok(Expression::Call {
                                         callee,
@@ -638,7 +691,7 @@ impl Analyzer {
                 unimplemented!();
             }
             Builtin::Ord => {
-                self.check_arguments(location, &args, vec![Type::BaseType(BaseType::Str)])?;
+                self.check_arguments(location, &args, &vec![Type::BaseType(BaseType::Str)])?;
                 let arg = &args[0];
 
                 match arg {
@@ -667,7 +720,7 @@ impl Analyzer {
         &self,
         location: &Location,
         actual_args: &Vec<Expression>,
-        expected_types: Vec<Type>,
+        expected_types: &Vec<Type>,
     ) -> Result<(), CompilationError> {
         if actual_args.len() != expected_types.len() {
             return Err(CompilationError::new(
@@ -709,10 +762,11 @@ impl Analyzer {
         Ok(())
     }
 
-    fn new_local(&mut self, name: &str, typ: Type) {
-        let index = self.get_scope_mut().variables.len();
+    fn new_local(&mut self, name: Option<&str>, typ: Type) -> Rc<Symbol> {
+        let index = self.local_counter;
+        self.local_counter += 1;
         let local = Rc::new(Local {
-            name: name.to_string(),
+            // name: name.to_string(),
             typ,
         });
         let symbol = Rc::new(Symbol::Local {
@@ -720,7 +774,10 @@ impl Analyzer {
             index,
         });
         self.get_scope_mut().locals.push(local);
-        self.define(name, symbol);
+        if let Some(name) = name {
+            self.define(name, symbol.clone());
+        }
+        symbol
     }
 
     fn define(&mut self, name: &str, symbol: Rc<Symbol>) {
@@ -728,7 +785,10 @@ impl Analyzer {
     }
 
     fn is_defined(&self, name: &str) -> bool {
-        self.scopes.last().unwrap().contains(name)
+        self.scopes
+            .last()
+            .expect("At least one scope")
+            .contains(name)
     }
 
     fn lookup(&self, name: &str) -> Option<Rc<Symbol>> {
@@ -745,7 +805,7 @@ impl Analyzer {
 
     fn store_value(&mut self, name: &str, typ: &Type) -> Rc<Symbol> {
         if !self.is_defined(name) {
-            self.new_local(name, typ.clone());
+            self.new_local(Some(name), typ.clone());
             // TODO: type deduction?
             // self.locals.push(typ.clone());
         }

@@ -9,7 +9,7 @@ Features:
 - Very minimal subset of the Python language. Only the core of it, nothing fancy.
 - CorePython compiler itself is embeddable in browser (small WebAssembly download).
 
-![Build Status](https://github.com/windelbouwman/corepython/workflows/CI/badge.svg)
+[![Build Status](https://github.com/windelbouwman/corepython/workflows/build/badge.svg)](https://github.com/windelbouwman/corepython/actions)
 
 # Phase
 
@@ -98,17 +98,22 @@ It is mapped to `f64`.
 
 ## How is Python's `list` implemented?
 
-This is an open topic. Initial idea is to go for Python's new
+This is an open topic. Initial idea is to go for Python's new (3.9+)
 syntax:
 
 ```python
 def myFunc(x: list[int]):
-    pass
+    y = [1, 2, 3]  # Type of y will be list[int]
 ```
 
-Representation of the list in memory is to be determined.
+Representation of the list in memory is a single `i32` with the length
+of the list, followed by the elements of the list. A list object
+is passed around as a single `i32` value which points to the memory
+where the list is residing.
 
-TODO
+This might change in the future, when support for list extending is added.
+Open issues:
+- How to append items? Reallocate the memory?
 
 ## How are Python's magic functions like `eval`, `exec`, `sys.setprofile` implemented?
 

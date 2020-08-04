@@ -81,7 +81,14 @@ if (code.length > 0) {
     
     WebAssembly.instantiate(code, {x: { putc: my_putc}})
     .then(result => {
-        result.instance.exports.mandel();
-        out.innerText += txt;
+        for (var i=0;i<9;i++)
+        {
+
+            txt = '';
+            console.time('mandel');
+            result.instance.exports.mandel();
+            console.timeEnd('mandel');
+            out.innerText += txt;
+        }
     })
 }

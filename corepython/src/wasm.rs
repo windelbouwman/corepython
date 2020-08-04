@@ -106,6 +106,7 @@ where
         self.write_type_section(&wasm)?;
         self.write_import_section(&wasm)?;
         self.write_func_section(&wasm)?;
+        self.write_memory_section(&wasm)?;
         self.write_export_section(&wasm)?;
         self.write_code_section(&wasm)?;
 
@@ -188,6 +189,37 @@ where
         for function in &module.functions {
             self.write_index(function.type_index)?;
         }
+        Ok(())
+    }
+
+    fn write_memory_section(&mut self, module: &WasmModule) -> Result<(), std::io::Error> {
+        let mut buf: Vec<u8> = vec![];
+        let mut w2 = Writer::new(&mut buf);
+        w2.write_memories(module)?;
+
+        self.write_section(5, &buf)?;
+
+        Ok(())
+    }
+
+    fn write_memories(&mut self, _module: &WasmModule) -> Result<(), std::io::Error> {
+        // 1 memory:
+        let memories: Vec<(usize, Option<usize>)> = vec![(100, None)];
+
+        self.write_vu32(memories.len() as u32)?;
+
+        // limits:
+        for (min_pages, max_pages) in memories {
+            if let Some(max_pages) = max_pages {
+                self.write_byte(0x1)?;
+                self.write_vu32(min_pages as u32)?;
+                self.write_vu32(max_pages as u32)?;
+            } else {
+                self.write_byte(0x0)?; // no max
+                self.write_vu32(min_pages as u32)?;
+            }
+        }
+
         Ok(())
     }
 
@@ -301,6 +333,30 @@ where
             Instruction::LocalSet(index) => {
                 self.write_byte(0x21)?;
                 self.write_index(*index)?;
+            }
+            // Instruction::LocalTee(index) => {
+            //     self.write_byte(0x22)?;
+            //     self.write_index(*index)?;
+            // }
+            Instruction::I32Load(align, offset) => {
+                self.write_byte(0x28)?;
+                self.write_index(*align)?;
+                self.write_index(*offset)?;
+            }
+            Instruction::F64Load(align, offset) => {
+                self.write_byte(0x2B)?;
+                self.write_index(*align)?;
+                self.write_index(*offset)?;
+            }
+            Instruction::I32Store(align, offset) => {
+                self.write_byte(0x36)?;
+                self.write_index(*align)?;
+                self.write_index(*offset)?;
+            }
+            Instruction::F64Store(align, offset) => {
+                self.write_byte(0x39)?;
+                self.write_index(*align)?;
+                self.write_index(*offset)?;
             }
             Instruction::Return => {
                 self.write_byte(0x0F)?;
@@ -457,6 +513,10 @@ pub enum Instruction {
     LocalGet(usize),
     LocalSet(usize),
     // LocalTee(usize),
+    I32Load(usize, usize),
+    F64Load(usize, usize),
+    I32Store(usize, usize),
+    F64Store(usize, usize),
     I32Const(i32),
     F64Const(f64),
     I32Eqz,
