@@ -154,18 +154,24 @@ pub enum Expression {
         arguments: Vec<Expression>,
         typ: Type,
     },
+    Indexed {
+        base: Box<Expression>,
+        index: Box<Expression>,
+        typ: Type,
+    },
 }
 
 impl Expression {
     pub fn get_type(&self) -> &Type {
         match self {
-            Expression::Number(_) => &Type::BaseType(BaseType::Integer),
-            Expression::Float(_) => &Type::BaseType(BaseType::Float),
-            Expression::String(_) => &Type::BaseType(BaseType::Str),
+            Expression::Number(_) => &Type::Integer,
+            Expression::Float(_) => &Type::Float,
+            Expression::String(_) => &Type::Str,
             Expression::List { typ, .. } => typ,
             Expression::Identifier(symbol) => symbol.get_type(),
             Expression::BinaryOperation { typ, .. } => typ,
             Expression::Call { typ, .. } => typ,
+            Expression::Indexed { typ, .. } => typ,
         }
     }
 }
@@ -178,40 +184,39 @@ pub enum BinaryOperation {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum BaseType {
+pub enum Type {
     Integer,
     Float,
     Bool,
     Str,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum Type {
-    BaseType(BaseType),
+    Bytes,
     // TODO: user type / function type
 
     // We do not know the type yet.
     // Unknown,
     /// A list of certain types
     List(Box<Type>),
+
+    Tuple(Box<Type>),
 }
 
 impl std::fmt::Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Type::BaseType(base_type) => match base_type {
-                BaseType::Float => write!(f, "float"),
-                BaseType::Integer => write!(f, "int"),
-                BaseType::Bool => write!(f, "bool"),
-                BaseType::Str => write!(f, "str"),
-            },
+            Type::Float => write!(f, "float"),
+            Type::Integer => write!(f, "int"),
+            Type::Bool => write!(f, "bool"),
+            Type::Str => write!(f, "str"),
+            Type::Bytes => write!(f, "bytes"),
             Type::List(element) => write!(f, "list[{}]", element),
+            Type::Tuple(element) => write!(f, "tuple[{}]", element),
         }
     }
 }
 
 enum TypeConstructor {
     List,
+    Tuple,
 }
 
 pub struct Scope {
@@ -276,11 +281,11 @@ impl Analyzer {
                     // TODO: how to determine parameter types?
                     // we could use type stubs???
                     let parameter_types = if name.contains("float") {
-                        vec![Type::BaseType(BaseType::Float)]
+                        vec![Type::Float]
                     } else {
-                        vec![Type::BaseType(BaseType::Integer)]
+                        vec![Type::Integer]
                     };
-                    let return_type = Some(Type::BaseType(BaseType::Integer));
+                    let return_type = Some(Type::Integer);
 
                     warn!(
                         "Assuming imported function {}.{} has signature {:?} -> {:?}",
@@ -321,8 +326,11 @@ impl Analyzer {
     fn get_type(&self, typ: &ast::Expression) -> Result<Type, CompilationError> {
         match &typ.kind {
             ast::ExpressionType::Identifier(name) => match name.as_str() {
-                "float" => Ok(Type::BaseType(BaseType::Float)),
-                "int" => Ok(Type::BaseType(BaseType::Integer)),
+                "float" => Ok(Type::Float),
+                "int" => Ok(Type::Integer),
+                "bool" => Ok(Type::Bool),
+                "str" => Ok(Type::Str),
+                "bytes" => Ok(Type::Bytes),
                 name => Err(new_error(
                     typ,
                     &format!("Invalid type identifier: {}", name),
@@ -345,6 +353,7 @@ impl Analyzer {
         match &con.kind {
             ast::ExpressionType::Identifier(name) => match name.as_str() {
                 "list" => Ok(TypeConstructor::List),
+                "tuple" => Ok(TypeConstructor::Tuple),
                 name => Err(new_error(
                     con,
                     &format!("No such type constructor {}", name),
@@ -357,6 +366,7 @@ impl Analyzer {
     fn apply(&self, con: TypeConstructor, arg: Type) -> Type {
         match con {
             TypeConstructor::List => Type::List(Box::new(arg)),
+            TypeConstructor::Tuple => Type::Tuple(Box::new(arg)),
         }
     }
 
@@ -445,17 +455,17 @@ impl Analyzer {
                 iter,
                 suite,
             } => {
-                let loop_var = self.new_local(None, Type::BaseType(BaseType::Integer));
-                let iter_var = self.new_local(None, Type::BaseType(BaseType::Integer));
+                let loop_var = self.new_local(None, Type::Integer);
+                let iter_var = self.new_local(None, Type::Integer);
                 let location = &iter.location;
                 let iter = self.analyze_expression(iter)?;
                 let typ = iter.get_type();
                 let element_typ = match typ {
                     Type::List(element_typ) => element_typ,
-                    Type::BaseType(..) => {
+                    other => {
                         return Err(CompilationError::new(
                             location,
-                            "Cannot iterate over this type.",
+                            format!("Cannot iterate over this type: {}", other),
                         ));
                     }
                 };
@@ -560,7 +570,7 @@ impl Analyzer {
 
                 let typ = Type::List(Box::new(element_typ.clone()));
 
-                let helper_local = self.new_local(None, Type::BaseType(BaseType::Integer));
+                let helper_local = self.new_local(None, Type::Integer);
 
                 Ok(Expression::List {
                     elements,
@@ -577,7 +587,7 @@ impl Analyzer {
                 let b = self.analyze_expression(b)?;
                 self.equal_types(a.get_type(), b.get_type(), &expression.location)?;
 
-                let typ = Type::BaseType(BaseType::Bool);
+                let typ = Type::Bool;
                 Ok(Expression::BinaryOperation {
                     a: Box::new(a),
                     op: BinaryOperation::Comparison(op.clone()),
@@ -607,7 +617,7 @@ impl Analyzer {
                     a: Box::new(a),
                     op: BinaryOperation::Boolean(op.clone()),
                     b: Box::new(b),
-                    typ: Type::BaseType(BaseType::Bool),
+                    typ: Type::Bool,
                 })
             }
             ast::ExpressionType::Call { callee, arguments } => {
@@ -632,7 +642,7 @@ impl Analyzer {
                                     )?;
 
                                     // Arg: TODO: determine type!
-                                    let typ = Type::BaseType(BaseType::Integer);
+                                    let typ = Type::Integer;
 
                                     Ok(Expression::Call {
                                         callee,
@@ -657,9 +667,12 @@ impl Analyzer {
                                         typ,
                                     })
                                 }
-                                Symbol::Builtin(builtin) => {
-                                    self.analyze_builtin_call(&expression.location, builtin, args)
-                                }
+                                Symbol::Builtin(builtin) => self.analyze_builtin_call(
+                                    &callee,
+                                    &expression.location,
+                                    builtin,
+                                    args,
+                                ),
                                 Symbol::Local { .. } => {
                                     Err(new_error(expression, "Cannot call local variable"))
                                 }
@@ -674,24 +687,80 @@ impl Analyzer {
                     _ => Err(new_error(callee, "Cannot call")),
                 }
             }
-            ast::ExpressionType::Indexed { .. } => {
-                unimplemented!();
+            ast::ExpressionType::Indexed { base, index } => {
+                let base = self.analyze_expression(base)?;
+                let typ: Type = match &base.get_type() {
+                    Type::List(element_typ) | Type::Tuple(element_typ) => *element_typ.clone(),
+                    other => {
+                        return Err(CompilationError::new(
+                            &expression.location,
+                            format!("Cannot index type: {}", other),
+                        ));
+                    }
+                };
+
+                let index = self.analyze_expression(index)?;
+                match index.get_type() {
+                    Type::Integer => {
+                        // Ok
+                    }
+                    other => {
+                        return Err(CompilationError::new(
+                            &expression.location,
+                            format!("Cannot use {} as index", other),
+                        ));
+                    }
+                }
+
+                Ok(Expression::Indexed {
+                    base: Box::new(base),
+                    index: Box::new(index),
+                    typ,
+                })
             }
         }
     }
 
     fn analyze_builtin_call(
         &self,
+        callee: &Rc<Symbol>,
         location: &Location,
         builtin: &Builtin,
         args: Vec<Expression>,
     ) -> Result<Expression, CompilationError> {
         match builtin {
             Builtin::Len => {
-                unimplemented!();
+                // Check arguments:
+                if args.len() != 1 {
+                    return Err(CompilationError::new(
+                        location,
+                        "len takes a single argument",
+                    ));
+                }
+
+                let arg = &args[0];
+                match arg.get_type() {
+                    Type::List(_) | Type::Tuple(_) => {
+                        // Ok
+                    }
+                    other => {
+                        return Err(CompilationError::new(
+                            location,
+                            format!("Cannot use {} as argument for len", other),
+                        ));
+                    }
+                }
+
+                let typ = Type::Integer;
+
+                Ok(Expression::Call {
+                    callee: callee.clone(),
+                    arguments: args,
+                    typ,
+                })
             }
             Builtin::Ord => {
-                self.check_arguments(location, &args, &vec![Type::BaseType(BaseType::Str)])?;
+                self.check_arguments(location, &args, &[Type::Str])?;
                 let arg = &args[0];
 
                 match arg {
@@ -719,13 +788,13 @@ impl Analyzer {
     fn check_arguments(
         &self,
         location: &Location,
-        actual_args: &Vec<Expression>,
-        expected_types: &Vec<Type>,
+        actual_args: &[Expression],
+        expected_types: &[Type],
     ) -> Result<(), CompilationError> {
         if actual_args.len() != expected_types.len() {
             return Err(CompilationError::new(
                 location,
-                &format!(
+                format!(
                     "Expected {} arguments, but got {}",
                     expected_types.len(),
                     actual_args.len()
@@ -738,7 +807,7 @@ impl Analyzer {
             if arg_typ != typ {
                 return Err(CompilationError::new(
                     location,
-                    &format!("Expected {} but got {}", typ, arg_typ),
+                    format!("Expected {} but got {}", typ, arg_typ),
                 ));
             }
         }
@@ -756,7 +825,7 @@ impl Analyzer {
         if a_typ != b_typ {
             return Err(CompilationError::new(
                 location,
-                &format!("Type mismatch: '{}' is not '{}'", a_typ, b_typ),
+                format!("Type mismatch: '{}' is not '{}'", a_typ, b_typ),
             ));
         }
         Ok(())

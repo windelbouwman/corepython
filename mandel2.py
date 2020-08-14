@@ -29,4 +29,11 @@ def mandel2():
         putc(32)
     putc(10)
 
+    i = 0
+    # while i < len(a) + 1:  # The +1 here triggers out of range, which is not checked!!
+    while i < len(a):
+        putc(65 + a[i])
+        putc(10)
+        i = i + 1
+
 # mandel()

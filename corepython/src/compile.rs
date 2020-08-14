@@ -51,18 +51,18 @@ impl Compiler {
 
     fn get_type(&self, typ: &analyze::Type) -> wasm::Type {
         match typ {
-            analyze::Type::BaseType(basetype) => match basetype {
-                analyze::BaseType::Float => wasm::Type::F64,
-                analyze::BaseType::Integer => wasm::Type::I32,
-                analyze::BaseType::Str => {
-                    unimplemented!();
-                }
-                analyze::BaseType::Bool => {
-                    wasm::Type::I32
-                    // unimplemented!("Ugh, what now?")
-                }
-            },
-            analyze::Type::List(_) => {
+            analyze::Type::Float => wasm::Type::F64,
+            analyze::Type::Integer => wasm::Type::I32,
+            analyze::Type::Str | analyze::Type::Bytes => {
+                // unimplemented!();
+                // Assume pointer to bytes or string object in memory
+                wasm::Type::I32
+            }
+            analyze::Type::Bool => {
+                wasm::Type::I32
+                // unimplemented!("Ugh, what now?")
+            }
+            analyze::Type::List(_) | analyze::Type::Tuple(_) => {
                 // Assume pointer to some data structure in wasm memory.
                 wasm::Type::I32
                 // unimplemented!("TODO: lists");
@@ -97,22 +97,18 @@ impl Compiler {
 
         if let Some(t) = &function.return_type {
             match t {
-                analyze::Type::BaseType(b) => {
-                    match b {
-                        analyze::BaseType::Integer | analyze::BaseType::Bool => {
-                            // Implicit return 0:
-                            self.emit(wasm::Instruction::I32Const(0));
-                        }
-                        analyze::BaseType::Float => {
-                            // Implicit return 0:
-                            self.emit(wasm::Instruction::F64Const(0.0));
-                        }
-                        analyze::BaseType::Str => {
-                            unimplemented!();
-                        }
-                    }
+                analyze::Type::Integer | analyze::Type::Bool => {
+                    // Implicit return 0:
+                    self.emit(wasm::Instruction::I32Const(0));
                 }
-                analyze::Type::List(_) => {
+                analyze::Type::Float => {
+                    // Implicit return 0:
+                    self.emit(wasm::Instruction::F64Const(0.0));
+                }
+                analyze::Type::Str | analyze::Type::Bytes => {
+                    unimplemented!();
+                }
+                analyze::Type::List(_) | analyze::Type::Tuple(_) => {
                     unimplemented!("TODO!");
                 }
             }
@@ -171,7 +167,7 @@ impl Compiler {
                 iter,
                 suite,
             } => {
-                let int_type = analyze::Type::BaseType(analyze::BaseType::Integer);
+                let int_type = analyze::Type::Integer;
 
                 info!("Loop var {:?}", loop_var);
                 info!("Iter var {:?}", iter_var);
@@ -191,17 +187,9 @@ impl Compiler {
                 // Load current element from iter var:
                 match iter.get_type() {
                     analyze::Type::List(element_type) => {
-                        let element_size = self.get_sizeof(element_type);
-                        let element_wasm_typ = self.get_type(element_type);
-                        let header_size = 4; // i32 for length of list
-                        let data_start = round_to_multiple_of(header_size, element_size);
-
                         self.get_local(iter_var);
                         self.get_local(loop_var);
-                        self.emit(wasm::Instruction::I32Const(element_size as i32)); // sizeof int32 .....
-                        self.emit(wasm::Instruction::I32Mul);
-                        self.emit(wasm::Instruction::I32Add);
-                        self.read_mem(data_start, &element_wasm_typ);
+                        self.builtin_list_index(&element_type);
                         self.store_value(target, &element_type);
                     }
                     _ => {
@@ -224,7 +212,7 @@ impl Compiler {
 
                 // Get length
                 self.get_local(iter_var);
-                self.emit(wasm::Instruction::I32Load(2, 0));
+                self.builtin_list_len();
 
                 // Are we done?
                 self.emit(wasm::Instruction::I32LtS);
@@ -240,16 +228,33 @@ impl Compiler {
         }
     }
 
+    /// Given a list as top of stack, retrieve its length.
+    fn builtin_list_len(&mut self) {
+        self.emit(wasm::Instruction::I32Load(2, 0));
+    }
+
+    /// Given a list and an index as top of stack, index the list
+    /// List element is at top of stack.
+    fn builtin_list_index(&mut self, element_type: &analyze::Type) {
+        let element_size = self.get_sizeof(element_type);
+        let element_wasm_typ = self.get_type(element_type);
+        let header_size = 4; // i32 for length of list
+        let data_start = round_to_multiple_of(header_size, element_size);
+
+        self.emit(wasm::Instruction::I32Const(element_size as i32)); // sizeof int32 .....
+        self.emit(wasm::Instruction::I32Mul);
+        self.emit(wasm::Instruction::I32Add);
+        self.read_mem(data_start, &element_wasm_typ);
+    }
+
     fn get_sizeof(&self, element_type: &analyze::Type) -> usize {
         match element_type {
-            analyze::Type::BaseType(base_type) => match base_type {
-                analyze::BaseType::Integer => 4,
-                analyze::BaseType::Float => 8,
-                _ => {
-                    unimplemented!();
-                }
-            },
+            analyze::Type::Integer => 4,
+            analyze::Type::Float => 8,
             analyze::Type::List(_) => 4,
+            _ => {
+                unimplemented!();
+            }
         }
     }
 
@@ -275,7 +280,7 @@ impl Compiler {
                 // elements sequentially.
                 // Another idea: evaluate all elements and finally push the length
                 // on the stack. Popping the elements will be in reversed order..
-                let int_type = analyze::Type::BaseType(analyze::BaseType::Integer);
+                let int_type = analyze::Type::Integer;
 
                 // TODO: arbitrary size of list:
                 assert!(!elements.is_empty());
@@ -357,13 +362,18 @@ impl Compiler {
                             unimplemented!();
                         }
                         analyze::Builtin::Len => {
-                            unimplemented!();
+                            self.builtin_list_len();
                         }
                     },
                     _ => {
                         panic!("Cannot call this!");
                     }
                 };
+            }
+            analyze::Expression::Indexed { base, index, typ } => {
+                self.compile_expression(base);
+                self.compile_expression(index);
+                self.builtin_list_index(typ);
             }
         }
     }

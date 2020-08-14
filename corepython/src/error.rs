@@ -7,10 +7,10 @@ pub struct CompilationError {
 }
 
 impl CompilationError {
-    pub fn new(location: &Location, message: &str) -> Self {
+    pub fn new<S: Into<String>>(location: &Location, message: S) -> Self {
         CompilationError {
             location: Some(location.clone()),
-            message: message.to_owned(),
+            message: message.into(),
         }
     }
 }

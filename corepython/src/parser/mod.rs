@@ -33,20 +33,20 @@ pub fn parse_python(source: &str) -> Result<ast::Program, CompilationError> {
             lalrpop_util::ParseError::UnrecognizedEOF { location, expected } => {
                 CompilationError::new(
                     &location,
-                    &format!("Unexpected end of file, expected: {}", expected.join(", ")),
+                    format!("Unexpected end of file, expected: {}", expected.join(", ")),
                 )
             }
             lalrpop_util::ParseError::UnrecognizedToken { token, expected } => {
                 CompilationError::new(
                     &token.0,
-                    &format!("Got {:?}, expected {} ", token.1, expected.join(", ")),
+                    format!("Got {:?}, expected {} ", token.1, expected.join(", ")),
                 )
             }
             lalrpop_util::ParseError::InvalidToken { location } => {
                 CompilationError::new(&location, "Invalid token.")
             }
             lalrpop_util::ParseError::ExtraToken { token } => {
-                CompilationError::new(&token.0, &format!("Got an extra token {:?}", token.1))
+                CompilationError::new(&token.0, format!("Got an extra token {:?}", token.1))
             }
             lalrpop_util::ParseError::User { error } => {
                 CompilationError::new(&error.location, &error.msg)
